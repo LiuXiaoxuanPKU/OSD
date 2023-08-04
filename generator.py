@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Tuple, List
 from transformers import AutoTokenizer
 from transformers import LlamaForCausalLM
+from chunker import DummyChunker
 
 @dataclass
 class InputAndCache:
@@ -16,11 +17,12 @@ class InputAndCache:
 class OutputAndCache:
     output_ids: torch.Tensor
     past_key_values: torch.Tensor
-        
+    
 class NBCEProposer:
-    def __init__(self, model, tokenizer) -> None:
+    def __init__(self, model, tokenizer, chunker) -> None:
         self.model = model
         self.tokenizer = tokenizer
+        self.chunker = chunker
         self.processors = LogitsProcessorList()
         self.processors.append(TopPLogitsWarper(0.95))
     
@@ -28,8 +30,9 @@ class NBCEProposer:
         if len(prompts) > 1:
             raise NotImplementedError()
         prompt = prompts[0]
-        # TODO: design different ways to chunk the prompt
-        inputs = self.tokenizer(['', prompt], padding='longest', return_tensors='pt').to('cuda')
+    
+        chunked_prompts = self.chunker.chunk(prompt)
+        inputs = self.tokenizer([''] + chunked_prompts, padding='longest', return_tensors='pt').to('cuda')
         
         return InputAndCache(inputs.input_ids, inputs.attention_mask, None)
     
@@ -92,10 +95,10 @@ class Verifier:
         return OutputAndCache(next_tokens, outputs.past_key_values)
              
 class Generator:
-    def __init__(self, model, tokenizer) -> None:
+    def __init__(self, model, tokenizer, chunker) -> None:
         self.model = model
         self.tokenizer = tokenizer
-        self.proposer = NBCEProposer(model, tokenizer)
+        self.proposer = NBCEProposer(model, tokenizer, chunker)
         self.verifier = Verifier(model, tokenizer)
         
         # parameters
@@ -199,23 +202,26 @@ class Generator:
                 generated_tokens = torch.cat([generated_tokens, accept_token_ids], dim=-1)
             generated_token_cnt += accept_token_ids.shape[1]
             
+            if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
+                break
+            
             # adjust the proposer/verifier input, discard unnecessary kv cache
             proposer_input, verifier_input = self.adjust_inputs(accept_token_ids, self.max_propose_tokens,
                                                                 proposer_input, verifier_input,
                                                                 proposer_output, verifier_output)
             
-            if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
-                break
             print("================================")
         return self.tokenizer.batch_decode(generated_tokens)
 
 
 if __name__ == "__main__":
     model_path = "/rscratch/zhendong/lily/longchat-7b-16k/"
+    model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
     model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
-    generator = Generator(model, tokenizer)
+    chunker = DummyChunker()
+    generator = Generator(model, tokenizer, chunker)
     prompt = ["can you give me a five day hawaii travel plan"]
     generated = generator.generate(prompt, 100)
     print(f"generated: {generated}")
