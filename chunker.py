@@ -13,9 +13,9 @@ class DummyChunker(Chunker):
         return [prompt]
     
 class LongchatChunker(Chunker):
-    def __init__(self) -> None:
+    def __init__(self, chunk_size=8) -> None:
         super().__init__()
-        self.chunk_size = 8
+        self.chunk_size = chunk_size
         
     def chunk(self, prompt: str) -> List[str]:
         start_mark = "Below is a record of lines I want you to remember."
@@ -43,9 +43,3 @@ class LongchatChunker(Chunker):
             prompt_with_templates.append(conv.get_prompt())
             
         return prompt_with_templates
-    
-    def get_org_full_prompt(self, prompt: str) -> str:
-        org_conv = get_conversation_template("vicuna")
-        org_conv.append_message(org_conv.roles[0], prompt)
-        org_conv.append_message(org_conv.roles[1], None)
-        return org_conv.get_prompt()

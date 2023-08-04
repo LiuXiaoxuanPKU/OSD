@@ -5,7 +5,16 @@ from dataclasses import dataclass
 from typing import Tuple, List
 from transformers import AutoTokenizer
 from transformers import LlamaForCausalLM
-from chunker import DummyChunker
+from chunker import DummyChunker, LongchatChunker
+
+import logging
+logger = logging.getLogger('generator_logger') 
+logger.setLevel(logging.INFO) 
+handler = logging.FileHandler('generator.log')
+handler.setLevel(logging.DEBUG)  # Set the minimum log level for this handler
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - Line: %(lineno)d - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 @dataclass
 class InputAndCache:
@@ -15,6 +24,7 @@ class InputAndCache:
 
 @dataclass
 class OutputAndCache:
+    generated_len: int
     output_ids: torch.Tensor
     past_key_values: torch.Tensor
     
@@ -42,6 +52,11 @@ class NBCEProposer:
         attention_mask = input.attention_mask
         batch_size = input_ids.shape[0]
         selected_tokens = torch.zeros(n, dtype=torch.long, device=input_ids.device)
+        logger.debug(f"proposer input shape: {input_ids.shape}")
+        logger.debug(f"proposer attention_mask shape {attention_mask.shape}")
+        if past_key_values is not None:
+            logger.debug(f"proposer past_key_values shape: {past_key_values[0][0].shape}")
+        generated_len = n
         for i in range(n):
             outputs = self.model(input_ids=input_ids,
                                  attention_mask=attention_mask,
@@ -69,30 +84,35 @@ class NBCEProposer:
             next_tokens = torch.argmax(logits, dim=-1).unsqueeze(-1)
             selected_tokens[i] = next_tokens[0].item()      
             if next_tokens[0] == self.tokenizer.eos_token_id:
+                generated_len = i + 1
                 break
             
             # prepare for next iteration
             input_ids = next_tokens.unsqueeze(-1).tile(batch_size, 1)
             attention_mask = torch.cat([attention_mask, torch.ones(batch_size, 1, dtype=torch.long, device="cuda")], dim=-1)        
 
-        return OutputAndCache(selected_tokens.unsqueeze(0), past_key_values)
+        return OutputAndCache(generated_len, selected_tokens.unsqueeze(0), past_key_values)
 
 class Verifier:
     def __init__(self, model, tokenizer) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.prompt_inputs = None
+        self.processor = LogitsProcessorList()
     
     def get_input(self, prompts) -> InputAndCache:
         self.prompt_inputs = self.tokenizer(prompts, padding="longest", return_tensors="pt").to(device="cuda")
+        logger.debug(f"prompt input length: {self.prompt_inputs.input_ids.shape}")
         return InputAndCache(self.prompt_inputs.input_ids, self.prompt_inputs.attention_mask, None)
     
     def verify(self, input: InputAndCache, max_propose_tokens: int) -> Tuple[InputAndCache, torch.Tensor]:
         outputs = self.model(input_ids=input.input_ids, 
                              attention_mask=input.attention_mask, 
                              past_key_values=input.past_key_values)
-        next_tokens = torch.argmax(outputs.logits[:, -max_propose_tokens-1:, :], dim=-1)
-        return OutputAndCache(next_tokens, outputs.past_key_values)
+        next_token_scores = self.processor(input.input_ids, outputs.logits)
+        generated_len = max_propose_tokens + 1
+        next_tokens = torch.argmax(next_token_scores[:, -generated_len:, :], dim=-1)
+        return OutputAndCache(generated_len, next_tokens, outputs.past_key_values)
              
 class Generator:
     def __init__(self, model, tokenizer, chunker) -> None:
@@ -102,12 +122,12 @@ class Generator:
         self.verifier = Verifier(model, tokenizer)
         
         # parameters
-        self.max_propose_tokens = 8
+        self.max_propose_tokens = 16
         
     def prepare_verifier_input(self, proposer_output: OutputAndCache, 
                                     verifier_input: InputAndCache,
                                     max_propose_tokens: int) -> InputAndCache:
-        print(proposer_output.output_ids.shape)
+        logger.debug(proposer_output.output_ids.shape)
         if verifier_input.past_key_values is None:
             # concatenate proposed inputs with prompts
             input_ids = torch.cat([self.verifier.prompt_inputs.input_ids, proposer_output.output_ids], dim=-1)
@@ -129,7 +149,7 @@ class Generator:
         assert proposed_output.output_ids.shape == verified_output.output_ids[:, :-1].shape, \
             f"{proposed_output.output_ids.shape}, {verified_output.output_ids[:, :-1].shape}"
         
-        print(f"compare token: {proposed_output.output_ids}, {verified_output.output_ids}")
+        logger.debug(f"compare token: {proposed_output.output_ids}, {verified_output.output_ids}")
         # a = [[1, 2, 3]], b = [[1, 2, 4]]
         # ~(a == b): [[0, 0, 1]]
         # after cumsum: [[0, 0, 1]]
@@ -152,9 +172,10 @@ class Generator:
             return tuple(new_past)
         
         proposer_input_ids = accept_token_ids.tile(proposer_input.input_ids.shape[0], 1)
-        proposer_generated_len = proposer_output.past_key_values[0][0].shape[2] + 1
+        total_generated_len = proposer_output.past_key_values[0][0].shape[2] + 1
         proposer_key_values = _crop_past_key_values(proposer_output.past_key_values, 
-                                    max_len=proposer_generated_len - max_propose_tokens)
+                                    max_len=total_generated_len - proposer_output.generated_len)
+        logger.debug(f"adjust input: {total_generated_len}, {total_generated_len - proposer_output.generated_len}")
         proposer_attn_masks = torch.cat([proposer_input.attention_mask, 
                                          torch.ones_like(proposer_input_ids, dtype=torch.long)], dim=-1)
         
@@ -170,10 +191,7 @@ class Generator:
         
         return (InputAndCache(proposer_input_ids, proposer_attn_masks, proposer_key_values), 
                 InputAndCache(verifier_input_ids, verifier_attn_masks, verifier_key_values))
-        
-    def check_stop(self) -> bool:
-        pass
-    
+
     @torch.inference_mode()
     def generate(self, batch, max_tokens):
         proposer_input = self.proposer.get_input(batch)
@@ -195,7 +213,7 @@ class Generator:
             
             # compare selected tokens
             accept_token_ids = self.compare_tokens(proposer_output, verifier_output)
-            print(accept_token_ids)
+            logger.info(accept_token_ids.shape)
             if generated_tokens is None:
                 generated_tokens = accept_token_ids
             else:
@@ -210,25 +228,27 @@ class Generator:
                                                                 proposer_input, verifier_input,
                                                                 proposer_output, verifier_output)
             
-            print("================================")
+            logger.debug("================================")
+        logger.debug(generated_tokens)
         return self.tokenizer.batch_decode(generated_tokens)
 
 
 if __name__ == "__main__":
-    model_path = "/rscratch/zhendong/lily/longchat-7b-16k/"
+    # model_path = "/rscratch/zhendong/lily/longchat-7b-16k/"
     model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
     model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
     chunker = DummyChunker()
     generator = Generator(model, tokenizer, chunker)
-    prompt = ["can you give me a five day hawaii travel plan"]
+    prompt = ["Give a five day hawaii travel plan" ]
     generated = generator.generate(prompt, 100)
-    print(f"generated: {generated}")
+    logger.debug(f"generated: {generated}")
     
     inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(model.device)
     ref_generated = model.generate(**inputs, max_new_tokens=100)
-    print(f"ref_generated: {tokenizer.batch_decode(ref_generated)}")
+    logger.debug(ref_generated)
+    logger.debug(f"ref_generated: {tokenizer.batch_decode(ref_generated)}")
     
     
     
