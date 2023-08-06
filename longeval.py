@@ -74,8 +74,8 @@ def main(args, model, tokenizer):
 
         test_cases = load_testcases(test_file)[:10]
         for idx, test_case in tqdm(enumerate(test_cases)):
-            # correct, prompt_length, summary = test_lines_one_sample_org(model=model, tokenizer=tokenizer, test_case=test_case)
-            correct, prompt_length, summary = test_lines_one_sample_chunk(model=model, tokenizer=tokenizer, test_case=test_case)
+            correct, prompt_length, summary = test_lines_one_sample_org(model=model, tokenizer=tokenizer, test_case=test_case)
+            # correct, prompt_length, summary = test_lines_one_sample_chunk(model=model, tokenizer=tokenizer, test_case=test_case)
             avg_length += prompt_length / len(test_cases)
             num_correct += correct
         accuracy = num_correct / len(test_cases)
