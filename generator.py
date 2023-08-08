@@ -8,9 +8,8 @@ from verifier import Verifier
 
 import logging
 logger = logging.getLogger('generator_logger') 
-logger.setLevel(logging.INFO) 
+logger.setLevel(logging.WARNING) 
 handler = logging.FileHandler('generator.log')
-handler.setLevel(logging.DEBUG)  # Set the minimum log level for this handler
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - Line: %(lineno)d - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
@@ -20,8 +19,8 @@ class Generator:
     def __init__(self, model, tokenizer, chunker) -> None:
         self.model = model
         self.tokenizer = tokenizer
-        # self.proposer = NBCEProposer(model, tokenizer, chunker)
-        self.proposer = RandomProposer()
+        self.proposer = NBCEProposer(model, tokenizer, chunker)
+        # self.proposer = RandomProposer()
         self.verifier = Verifier(model, tokenizer)
         
         # parameters
@@ -77,6 +76,9 @@ class Generator:
         logger.debug(generated_tokens)
         logger.info(f"generated tokens: {generated_tokens.shape}")
         return self.tokenizer.batch_decode(generated_tokens)
+    
+    def __del__(self):
+        print(f"[Max allocated memory]: {torch.cuda.max_memory_allocated() / 1024 / 1024} MB")
 
 
 if __name__ == "__main__":
