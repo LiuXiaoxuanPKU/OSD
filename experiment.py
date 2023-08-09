@@ -63,8 +63,8 @@ def chunk_exp(model, tokenizer, prompt):
 
 def mask_exp(model, tokenizer, prompt):
     def mask_lower(mask):
-        q_len, kv_len = mask.shape[0], mask.shape[1]
-        for i in range(q_len//2, q_len):
+        bs, kv_len = mask.shape[0], mask.shape[1]
+        for i in range(bs):
             for j in range(0, kv_len//2):
                 mask[i, j] = 0
         return mask
@@ -83,7 +83,7 @@ def mask_exp(model, tokenizer, prompt):
     
     # attention_mask = mask_lower(inputs.attention_mask)
     attention_mask = inputs.attention_mask
-    
+            
     max_new_tokens = 20
     past_key_values = None
     input_ids = inputs.input_ids
@@ -93,8 +93,9 @@ def mask_exp(model, tokenizer, prompt):
                                                                 input_ids,
                                                                 attention_mask, 
                                                                 past_key_values)
+        seq_len = past_key_values[0][0].shape[2] + 1
         input_ids = next_token_id.unsqueeze(1)
-        attention_mask = torch.cat([attention_mask, torch.ones(1, 1, dtype=torch.long, device="cuda")], dim=-1) 
+        attention_mask = torch.ones(1, seq_len, dtype=torch.long, device="cuda") 
         attention_mask = mask_lower(attention_mask)
         print(next_token, end='')
     
@@ -132,7 +133,7 @@ if __name__ == "__main__":
     conv.append_message(conv.roles[1], None)
     prompt_with_templates = conv.get_prompt()
        
-    chunk_exp(model, tokenizer, prompt_with_templates)
+    # chunk_exp(model, tokenizer, prompt_with_templates)
     mask_exp(model, tokenizer, prompt_with_templates)     
 
    
