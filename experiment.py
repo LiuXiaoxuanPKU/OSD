@@ -66,7 +66,7 @@ def mask_exp(model, tokenizer, prompt):
         q_len, kv_len = mask.shape[0], mask.shape[1]
         for i in range(q_len//2, q_len):
             for j in range(0, kv_len//2):
-                mask[i, j] = -10000
+                mask[i, j] = 0
         return mask
     
     inputs = tokenizer([prompt], return_tensors="pt", padding=True).to(model.device)
