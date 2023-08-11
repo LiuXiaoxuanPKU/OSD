@@ -41,13 +41,19 @@ def prepare_inputs(position_type: PositionType,
                                     end=position_start_id+input_ids.shape[-1], 
                                     device='cuda', dtype=torch.long)
     elif position_type == PositionType.SingleAbsolute:
-        input_ids = torch.cat(generated, dim=-1).unsqueeze(0)
+        if len(generated) == 0:
+            input_ids = prompt_ids[:, (chunk_id + 1) * chunk_size].unsqueeze(0)
+        else:
+            input_ids = torch.cat(generated, dim=-1).unsqueeze(0)
         position_start_id = (chunk_id + 1) * chunk_size
         position_ids = torch.arange(start=position_start_id, 
                                     end=position_start_id+input_ids.shape[-1], 
                                     device='cuda', dtype=torch.long)
     elif position_type == PositionType.SingleRelative:
-        input_ids = torch.cat(generated, dim=-1).unsqueeze(0)
+        if len(generated) == 0:
+            input_ids = prompt_ids[:, (chunk_id + 1) * chunk_size].unsqueeze(0)
+        else:
+            input_ids = torch.cat(generated, dim=-1).unsqueeze(0)
         position_start_id = 0
         position_ids = torch.arange(start=position_start_id, 
                                     end=position_start_id+input_ids.shape[-1], 
@@ -71,14 +77,13 @@ def chunk_exp(model, tokenizer, prompt):
                                                                 input_ids,
                                                                 attention_mask, 
                                                                 past_key_values)
-        # print(past_key_values[0][0].shape)
         next_token = next_token.unsqueeze(1)
-        if len(chunk_generated) == 0:
-            for chunk_id in range(num_chunk):
-                chunk_generated[chunk_id] = [next_token.squeeze(0)]
+        for chunk_id in range(num_chunk):
+            if chunk_id not in chunk_generated:
+                chunk_generated[chunk_id] = []
         for chunk_id in range(num_chunk):
             chunk_past_key_values = slice_past_key_values(past_key_values, chunk_id * chunk_size, chunk_size)
-            chunk_input_ids, chunk_position_ids, chunk_attn_mask = prepare_inputs(PositionType.SingleRelative, 
+            chunk_input_ids, chunk_position_ids, chunk_attn_mask = prepare_inputs(PositionType.SingleAbsolute, 
                                                                              chunk_generated[chunk_id],
                                                                              inputs.input_ids,
                                                                              chunk_id,
@@ -95,7 +100,8 @@ def chunk_exp(model, tokenizer, prompt):
     print("==========chunk generated=========")
     for k in chunk_generated:
         print(k, [c.item() for c in chunk_generated[k]])
-        print(k, [tokenizer.decode(c.item()) for c in chunk_generated[k]])
+        print(tokenizer.batch_decode(inputs.input_ids[:, k * chunk_size : (k + 1) * chunk_size])[0])
+        print(k, tokenizer.batch_decode([c.item() for c in chunk_generated[k]]))
     print("==========ref generated=========")
     out = model.generate(**inputs, max_new_tokens=max_new_tokens)[0][prompt_len:]
     print(out)
@@ -146,8 +152,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     model_path = args.model
-    model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
-
+    from monkey_patch.llama_condense_monkey_patch import replace_llama_with_condense
+    replace_llama_with_condense()
     model, tokenizer = load_model(
             model_path,
             device="cuda",

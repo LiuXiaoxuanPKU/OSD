@@ -7,16 +7,17 @@ from einops import rearrange
 from functools import partial
 
 class CondenseRotaryEmbedding(torch.nn.Module):
-    def __init__(self, dim, ratio, max_position_embeddings=2048, base=10000, device=None):
+    def __init__(self, dim, scaling_factor, max_position_embeddings=2048, base=10000, device=None):
         super().__init__()
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float().to(device) / dim))
         self.register_buffer("inv_freq", inv_freq)
         
+
         # Build here to make `torch.jit.trace` work.
-        self.ratio = ratio
-        max_position_embeddings *= ratio
+        self.ratio = scaling_factor
+        max_position_embeddings *= scaling_factor
         self.max_seq_len_cached = max_position_embeddings
-        t = torch.arange(self.max_seq_len_cached, device=self.inv_freq.device, dtype=self.inv_freq.dtype) / ratio
+        t = torch.arange(self.max_seq_len_cached, device=self.inv_freq.device, dtype=self.inv_freq.dtype) / scaling_factor
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
@@ -36,9 +37,10 @@ class CondenseRotaryEmbedding(torch.nn.Module):
             self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(x.dtype), persistent=False)
             self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(x.dtype), persistent=False)
         return (
-            self.cos_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
-            self.sin_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
+            self.cos_cached[:, :, :, ...].to(dtype=x.dtype),
+            self.sin_cached[:, :, :, ...].to(dtype=x.dtype),
         )
 
-def replace_llama_with_condense(ratio):
-    transformers.models.llama.modeling_llama.LlamaRotaryEmbedding = partial(CondenseRotaryEmbedding, ratio=ratio)
+def replace_llama_with_condense():
+    transformers.models.llama.modeling_llama.LlamaRotaryEmbedding = CondenseRotaryEmbedding
+    transformers.models.llama.modeling_llama.LlamaLinearScalingRotaryEmbedding = CondenseRotaryEmbedding
