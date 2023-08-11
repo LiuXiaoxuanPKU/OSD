@@ -3,6 +3,14 @@ import torch
 from common import slice_past_key_values, crop_past_key_values
 from fastchat.model import get_conversation_template, load_model
 import argparse
+from enum import Enum
+from typing import List
+
+class PositionType(Enum):
+    SingleAbsolute = 1
+    SingleRelative = 2
+    MultiAbsolute = 3
+    MultiRelative = 4
 
 @torch.inference_mode()
 def model_generate(model, input_ids, att_mask, past_key_values, position_ids=None):
@@ -13,6 +21,40 @@ def model_generate(model, input_ids, att_mask, past_key_values, position_ids=Non
     next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1)
     return next_token, tokenizer.batch_decode([next_token])[0], outputs.past_key_values   
 
+def prepare_inputs(position_type: PositionType, 
+                               generated: List[torch.Tensor],
+                               prompt_ids: torch.Tensor,
+                               chunk_id: int,
+                               chunk_size: int):
+    if position_type == PositionType.MultiAbsolute:
+        chunk_ids = prompt_ids[:, chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
+        input_ids = torch.cat([chunk_ids, torch.cat(generated, dim=-1).reshape(1, -1)], dim=-1)
+        position_start_id = (chunk_id + 1) * chunk_size
+        position_ids = torch.arange(start=position_start_id, 
+                                    end=position_start_id+input_ids.shape[-1], 
+                                    device='cuda', dtype=torch.long)
+    elif position_type == PositionType.MultiRelative:
+        chunk_ids = prompt_ids[:, chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
+        input_ids = torch.cat([chunk_ids, torch.cat(generated, dim=-1).reshape(1, -1)], dim=-1)
+        position_start_id = 0
+        position_ids = torch.arange(start=position_start_id, 
+                                    end=position_start_id+input_ids.shape[-1], 
+                                    device='cuda', dtype=torch.long)
+    elif position_type == PositionType.SingleAbsolute:
+        input_ids = torch.cat(generated, dim=-1).unsqueeze(0)
+        position_start_id = (chunk_id + 1) * chunk_size
+        position_ids = torch.arange(start=position_start_id, 
+                                    end=position_start_id+input_ids.shape[-1], 
+                                    device='cuda', dtype=torch.long)
+    elif position_type == PositionType.SingleRelative:
+        input_ids = torch.cat(generated, dim=-1).unsqueeze(0)
+        position_start_id = 0
+        position_ids = torch.arange(start=position_start_id, 
+                                    end=position_start_id+input_ids.shape[-1], 
+                                    device='cuda', dtype=torch.long)
+    atten_mask = None
+    return input_ids, position_ids, atten_mask
+            
 def chunk_exp(model, tokenizer, prompt):
     chunk_generated = {}
     max_new_tokens = 20
@@ -31,24 +73,22 @@ def chunk_exp(model, tokenizer, prompt):
                                                                 past_key_values)
         # print(past_key_values[0][0].shape)
         next_token = next_token.unsqueeze(1)
-        chunk_attn_mask = torch.ones((1, chunk_size + 1 + token_id))
         if len(chunk_generated) == 0:
-            for start_idx in range(num_chunk):
-                chunk_generated[start_idx] = [next_token.squeeze(0)]
-        for start_idx in range(num_chunk):
-            chunk_past_key_values = slice_past_key_values(past_key_values, start_idx * chunk_size, chunk_size)
-            # position_start_id = (start_idx + 1) * chunk_size + token_id
-            # position_start_id =  chunk_past_key_values[0][0].shape[2]
-            # chunk_position_ids = torch.arange(start=position_start_id, end=position_start_id+token_id+1, step=1, device='cuda', requires_grad=False, dtype=torch.long)
-            # chunk_position_ids = chunk_position_ids.unsqueeze(0)
-            chunk_position_ids = None
-            chunk_input_ids = torch.cat(chunk_generated[start_idx], dim=-1).unsqueeze(0)
+            for chunk_id in range(num_chunk):
+                chunk_generated[chunk_id] = [next_token.squeeze(0)]
+        for chunk_id in range(num_chunk):
+            chunk_past_key_values = slice_past_key_values(past_key_values, chunk_id * chunk_size, chunk_size)
+            chunk_input_ids, chunk_position_ids, chunk_attn_mask = prepare_inputs(PositionType.SingleRelative, 
+                                                                             chunk_generated[chunk_id],
+                                                                             inputs.input_ids,
+                                                                             chunk_id,
+                                                                             chunk_size)
             chunk_token_id, chunk_token, _ = model_generate(model, 
                                                chunk_input_ids, 
                                                chunk_attn_mask, 
                                                chunk_past_key_values,
                                                chunk_position_ids)
-            chunk_generated[start_idx].append(chunk_token_id)
+            chunk_generated[chunk_id].append(chunk_token_id)
         # prepare for next iteration
         input_ids = next_token
         attention_mask = torch.cat([attention_mask, torch.ones(1, 1, dtype=torch.long, device="cuda")], dim=-1)        
@@ -133,7 +173,7 @@ if __name__ == "__main__":
     conv.append_message(conv.roles[1], None)
     prompt_with_templates = conv.get_prompt()
        
-    # chunk_exp(model, tokenizer, prompt_with_templates)
-    mask_exp(model, tokenizer, prompt_with_templates)     
+    chunk_exp(model, tokenizer, prompt_with_templates)
+    # mask_exp(model, tokenizer, prompt_with_templates)     
 
    
