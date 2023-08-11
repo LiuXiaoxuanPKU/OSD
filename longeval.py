@@ -90,9 +90,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_gpu_memory", type=int, default=40, help="max per gpu memory in GiB. A100 is 40 or 80.")
     
     args = parser.parse_args()
-    from llama_condense_monkey_patch import replace_llama_with_condense
-    longchat_ratio = 8
-    replace_llama_with_condense(longchat_ratio)
+    from monkey_patch.llama_condense_monkey_patch import replace_llama_with_condense
+    replace_llama_with_condense()
 
     model, tokenizer = load_model(
             args.model_name_or_path,
