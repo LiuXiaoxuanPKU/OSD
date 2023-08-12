@@ -3,7 +3,7 @@ import time
 from transformers import AutoTokenizer, LlamaForCausalLM
 from chunker import DummyChunker
 from common import OutputAndCache
-from proposer import RandomProposer, NBCEProposer
+from proposer import RandomProposer, NBCEProposer, NBCEOptimizeProposer
 from verifier import Verifier
 
 import logging
@@ -16,12 +16,12 @@ logger.addHandler(handler)
 
              
 class Generator:
-    def __init__(self, model, tokenizer, chunker) -> None:
+    def __init__(self, model, tokenizer, chunker, proposer=None, verifier=None) -> None:
         self.model = model
         self.tokenizer = tokenizer
-        self.proposer = NBCEProposer(model, tokenizer, chunker)
+        self.proposer = NBCEProposer(model, tokenizer, chunker) if proposer is None else proposer
         # self.proposer = RandomProposer()
-        self.verifier = Verifier(model, tokenizer)
+        self.verifier = Verifier(model, tokenizer) if verifier is None else verifier
         
         # parameters
         self.max_propose_tokens = 16
@@ -40,8 +40,8 @@ class Generator:
 
     @torch.inference_mode()
     def generate(self, batch, max_tokens):
-        proposer_input = self.proposer.set_prompt(batch)
         verifier_input = self.verifier.set_prompt(batch)
+        proposer_input = self.proposer.set_prompt(batch)
         
         generated_token_cnt = 0
         generated_tokens = None
@@ -53,7 +53,7 @@ class Generator:
             verifier_input = self.verifier.prepare_input(proposer_output, 
                                                          verifier_input)
             
-            # forward n tokens on the model in the a single batch
+            # forward n tokens on the model in the a single run
             verifier_output = self.verifier.verify(verifier_input, self.max_propose_tokens)
             
             # compare selected tokens
@@ -88,7 +88,9 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
     chunker = DummyChunker()
-    generator = Generator(model, tokenizer, chunker)
+    generator = Generator(model, tokenizer, chunker, 
+                          NBCEOptimizeProposer(model, tokenizer, chunker),
+                          Verifier(model, tokenizer))
     prompts = ["Do you like travelling? If yes, give me three reasons." ,
               "Give me a five day hawaii travel plan",
               "Describe a city you live in"]

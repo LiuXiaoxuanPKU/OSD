@@ -136,3 +136,37 @@ class NBCEProposer(Proposer):
         proposer_attn_masks = torch.cat([proposer_input.attention_mask, 
                                          torch.ones_like(proposer_input_ids, dtype=torch.long)], dim=-1)
         return InputAndCache(proposer_input_ids, proposer_attn_masks, proposer_key_values)
+    
+    
+class NBCEOptimizeProposer(NBCEProposer):
+    def __init__(self, model, tokenizer, chunker) -> None:
+        super().__init__()
+    
+    def set_prompt(self, prompts: List[str], past_key_values) -> InputAndCache:
+        if len(prompts) > 1:
+            raise NotImplementedError()
+    
+        inputs = self.tokenizer(prompts, padding='longest', return_tensors='pt').to('cuda')
+        assert inputs.shape[1] == past_key_values[0][0].shape[2]
+        
+        seq_len = inputs.shape[-1]
+        assert (seq_len % num_chunk) == 0
+        num_chunk = 8
+        chunk_size = seq_len // num_chunk
+        
+        input_ids = []
+        for i in range(num_chunk):
+            input_ids.append(inputs.input_ids[(i+1) * chunk_size])
+        input_ids = input_ids.reshape(-1, 1)
+        attention_mask = input_ids.attention_mask.reshape(num_chunk, chunk_size)
+        # reshape kv cache
+        new_past = []
+        for idx in range(len(past_key_values)):
+            bsz, num_head, seq_len, kv_dim = past_key_values[idx][0]
+            new_past.append(
+                (
+                    past_key_values[idx][0].reshape(num_chunk * bsz, num_head, chunk_size, kv_dim),
+                    past_key_values[idx][1].reshape(num_chunk * bsz, num_head, chunk_size, kv_dim)
+                )
+            )
+        return InputAndCache(input_ids, attention_mask, tuple(new_past))
