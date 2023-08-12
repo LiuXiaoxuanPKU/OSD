@@ -1,2 +1,5 @@
 transformers==4.31.0
 fschat==0.2.23
+packaging
+ninja
+flash-attn

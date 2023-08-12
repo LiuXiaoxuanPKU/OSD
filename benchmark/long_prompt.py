@@ -4,13 +4,16 @@ import argparse
 import time
 import torch
 from fastchat.model import load_model
+import matplotlib.pyplot as plt
+import pickle as pk
 
 @torch.inference_mode()
 def model_generate(model, input_ids, att_mask, past_key_values, position_ids=None):
     outputs = model(input_ids=input_ids, 
                         attention_mask=att_mask, 
                         past_key_values=past_key_values,
-                        position_ids=position_ids)
+                        position_ids=position_ids,
+                        use_cache=True)
     next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1)
     return next_token, tokenizer.batch_decode([next_token])[0], outputs.past_key_values   
 
@@ -35,6 +38,7 @@ def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
     repeat = 5
     for _ in range(repeat):
         for i in range(decode_len):
+            print(i)
             start = time.time()
             next_token_id, _, past_key_values = model_generate(model, 
                                                                 input_ids,
@@ -42,8 +46,8 @@ def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
                                                                 past_key_values)
             token_times[i] += time.time() - start
             input_ids = next_token_id.unsqueeze(0)
-            attention_mask = torch.cat([attention_mask, torch.ones(1, 1, dtype=torch.long, device="cuda")], dim=-1)  
-        
+            attention_mask = torch.cat([attention_mask, torch.ones(1, 1, dtype=torch.long, device="cuda")], dim=-1)
+            
     return [t * 1.0 / repeat for t in token_times]  
 
 if __name__ == "__main__":
@@ -53,19 +57,28 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     from monkey_patch.llama_condense_monkey_patch import replace_llama_with_condense
+    from monkey_patch.llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
     replace_llama_with_condense()
-
+    replace_llama_attn_with_flash_attn()
+    
     model, tokenizer = load_model(args.model_name_or_path,device="cuda")
     single_prompt = load_prompt(args.test_dir)
     
     # warmup
     bench_token_speed(4 * 1024, 1, model, tokenizer, single_prompt)
-    for prompt_len in range(4, 6):
-        prompt_len = prompt_len * 1024
-        for decode_len in [1, 8, 64]:
-            print(bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt))
     
-    # for prompt_len in range(32, 129, 32):
-    #     prompt_len = prompt_len * 1024
-    #     for decode_len in [1, 8, 64, 256, 1024]:
-    #         bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+    results = {}
+    for prompt_len in range(32, 129, 32):
+        print(f"========================={prompt_len}=======================")
+        prompt_len = prompt_len * 1024
+        decode_len = 64
+        results[prompt_len] = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+        replace_llama_attn_with_flash_attn()
+    
+    pk.dump(results, open("benchmark/bench.pk", "wb"))
+    for prompt_len in results:
+        token_times = results[prompt_len]
+        plt.scatter(list(range(len(token_times))), token_times, label=f"prompt={prompt_len}K")
+    plt.xlabel("Token Id")
+    plt.ylabel("Time (s)")
+    plt.savefig("benchmark/token_time")
