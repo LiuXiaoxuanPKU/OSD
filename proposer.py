@@ -150,7 +150,7 @@ class NBCEOptimizeProposer(NBCEProposer):
         assert inputs.input_ids.shape[1] == past_key_values[0][0].shape[2]
         
         seq_len = inputs.input_ids.shape[-1]
-        num_chunk = 2
+        num_chunk = 8
         assert (seq_len % num_chunk) == 0
         chunk_size = seq_len // num_chunk
         

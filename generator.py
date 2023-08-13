@@ -5,6 +5,7 @@ from chunker import DummyChunker
 from common import OutputAndCache
 from proposer import RandomProposer, NBCEProposer, NBCEOptimizeProposer
 from verifier import Verifier, OptimizeVerifier
+from common import sychronize_time
 
 import logging
 logger = logging.getLogger('generator_logger') 
@@ -25,6 +26,7 @@ class Generator:
         
         # parameters
         self.max_propose_tokens = 16
+        self.generation_time = []
         
     def compare_tokens(self, proposed_output: OutputAndCache, verified_output: OutputAndCache) -> torch.Tensor:
         assert proposed_output.output_ids.shape == verified_output.output_ids[:, :-1].shape, \
@@ -41,12 +43,16 @@ class Generator:
 
     @torch.inference_mode()
     def generate(self, batch, max_tokens):
+        start = sychronize_time()
         verifier_input = self.verifier.set_prompt(batch)
         proposer_input = self.proposer.set_prompt(batch, verifier_input.past_key_values)
+        prompt_time = sychronize_time() - start
+        self.generation_time.append(prompt_time)
         
         generated_token_cnt = 0
         generated_tokens = None
         while True:
+            start = sychronize_time()
             # propose n tokens
             proposer_output = self.proposer.propose(proposer_input, self.max_propose_tokens)
             
@@ -66,13 +72,18 @@ class Generator:
                 generated_tokens = torch.cat([generated_tokens, accept_token_ids], dim=-1)
             generated_token_cnt += accept_token_ids.shape[1]
             
-            if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
-                break
             
             # adjust the proposer/verifier input, discard unnecessary kv cache
             proposer_input = self.proposer.adjust_input(accept_token_ids, proposer_input, proposer_output)
             verifier_input = self.verifier.adjust_input(accept_token_ids, verifier_input, verifier_output)
             
+            self.generation_time.append(sychronize_time() - start)
+            
+            # if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
+            #     break
+            
+            if generated_token_cnt >= max_tokens:
+                break
             logger.debug("================================")
         logger.debug(generated_tokens)
         logger.info(f"generated tokens: {generated_tokens.shape}")

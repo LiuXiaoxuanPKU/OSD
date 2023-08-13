@@ -84,7 +84,7 @@ class Verifier:
         print(f"[Verifier] verify time: {self.verify_time}, adjust time: {self.adjust_input_time}, prepare input time: {self.prepare_input_time}")
         
         
-class VerifierOptimizer(Verifier):
+class OptimizeVerifier(Verifier):
     def set_prompt(self, prompts) -> InputAndCache:
         self.prompt_inputs = self.tokenizer(prompts, padding="longest", return_tensors="pt").to(device="cuda")
         logger.debug(f"prompt input length: {self.prompt_inputs.input_ids.shape}")

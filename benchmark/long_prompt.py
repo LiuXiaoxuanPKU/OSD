@@ -43,6 +43,7 @@ def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
     input_ids, attention_mask, past_key_values = input.input_ids, input.attention_mask, None
     token_times = [0] * decode_len
     repeat = 5
+    bench_start = time.time()
     for _ in range(repeat):
         for i in range(decode_len):
             start = time.time()
@@ -53,16 +54,22 @@ def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
             token_times[i] += time.time() - start
             input_ids = next_token_id.unsqueeze(0)
             attention_mask = torch.cat([attention_mask, torch.ones(1, 1, dtype=torch.long, device="cuda")], dim=-1)
-            
-    return [t * 1.0 / repeat for t in token_times]  
+    avg_time = (time.time() - bench_start) / repeat     
+    token_times = [t * 1.0 / repeat for t in token_times] 
+    return token_times, avg_time
 
 def bench_optimize_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
-    input, prompt = prepare_input(tokenizer, prompt_len, single_prompt)
+    _, prompt = prepare_input(tokenizer, prompt_len, single_prompt)
     chunker = DummyChunker()
     generator = Generator(model, tokenizer, chunker, 
                           NBCEOptimizeProposer(model, tokenizer, chunker),
                           OptimizeVerifier(model, tokenizer))
-    generator.generate([prompt], )
+    repeat = 5
+    bench_start = time.time()
+    for _ in range(repeat):
+        generator.generate([prompt], max_tokens=decode_len)
+    avg_time = (time.time() - bench_start) / repeat
+    return None, avg_time
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -86,19 +93,21 @@ if __name__ == "__main__":
         print(f"========================={prompt_len}=======================")
         prompt_len = prompt_len * 1024
         decode_len = 64
-        results[prompt_len] = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+        # results[prompt_len], avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+        _, avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+        print(avg_time)
         replace_llama_attn_with_flash_attn()
     
-    pk.dump(results, open("benchmark/bench.pk", "wb"))
+    # pk.dump(results, open("benchmark/bench.pk", "wb"))
     
-    # results = pk.load(open("benchmark/bench.pk", "rb"))
-    # print(results)
-    plt.figure(figsize=(8, 4))
-    for prompt_len in results:
-        token_times = results[prompt_len]
-        plt.scatter(list(range(len(token_times))), token_times, label=f"prompt={int(prompt_len/1024)}K", s=5)
-    plt.xlabel("Token Id")
-    plt.ylabel("Time (s)")
-    plt.legend()
-    plt.ylim(0, 0.5)
-    plt.savefig("benchmark/decode_token_time")
+    # # results = pk.load(open("benchmark/bench.pk", "rb"))
+    # # print(results)
+    # plt.figure(figsize=(8, 4))
+    # for prompt_len in results:
+    #     token_times = results[prompt_len]
+    #     plt.scatter(list(range(len(token_times))), token_times, label=f"prompt={int(prompt_len/1024)}K", s=5)
+    # plt.xlabel("Token Id")
+    # plt.ylabel("Time (s)")
+    # plt.legend()
+    # plt.ylim(0, 0.5)
+    # plt.savefig("benchmark/decode_token_time")
