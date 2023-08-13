@@ -7,6 +7,9 @@ from fastchat.model import load_model
 import matplotlib.pyplot as plt
 import pickle as pk
 
+import sys
+sys.path.append('.')
+
 @torch.inference_mode()
 def model_generate(model, input_ids, att_mask, past_key_values, position_ids=None):
     outputs = model(input_ids=input_ids, 
@@ -38,7 +41,6 @@ def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
     repeat = 5
     for _ in range(repeat):
         for i in range(decode_len):
-            print(i)
             start = time.time()
             next_token_id, _, past_key_values = model_generate(model, 
                                                                 input_ids,
@@ -52,8 +54,8 @@ def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-name-or-path", type=str, help="model path", default="/rscratch/zhendong/lily/longchat-7b-16k/")
-    parser.add_argument("--test_dir", type=str, default="/home/eecs/zhen/lily/LongChat/longeval/evaluation", help="Directory of the testcases")
+    parser.add_argument("--model-name-or-path", type=str, help="model path", default="/data/longchat-7b-16k/")
+    parser.add_argument("--test_dir", type=str, default="/home/lily/LongChat/longeval/evaluation", help="Directory of the testcases")
     
     args = parser.parse_args()
     from monkey_patch.llama_condense_monkey_patch import replace_llama_with_condense
@@ -68,7 +70,7 @@ if __name__ == "__main__":
     bench_token_speed(4 * 1024, 1, model, tokenizer, single_prompt)
     
     results = {}
-    for prompt_len in range(32, 129, 32):
+    for prompt_len in range(16, 56, 8):
         print(f"========================={prompt_len}=======================")
         prompt_len = prompt_len * 1024
         decode_len = 64
@@ -76,9 +78,15 @@ if __name__ == "__main__":
         replace_llama_attn_with_flash_attn()
     
     pk.dump(results, open("benchmark/bench.pk", "wb"))
+    
+    # results = pk.load(open("benchmark/bench.pk", "rb"))
+    # print(results)
+    plt.figure(figsize=(8, 4))
     for prompt_len in results:
         token_times = results[prompt_len]
-        plt.scatter(list(range(len(token_times))), token_times, label=f"prompt={prompt_len}K")
+        plt.scatter(list(range(len(token_times))), token_times, label=f"prompt={int(prompt_len/1024)}K", s=5)
     plt.xlabel("Token Id")
     plt.ylabel("Time (s)")
-    plt.savefig("benchmark/token_time")
+    plt.legend()
+    plt.ylim(0, 0.5)
+    plt.savefig("benchmark/decode_token_time")
