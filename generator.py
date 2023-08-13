@@ -3,8 +3,8 @@ import time
 from transformers import AutoTokenizer, LlamaForCausalLM
 from chunker import DummyChunker
 from common import OutputAndCache
-from proposer import RandomProposer, NBCEProposer
-from verifier import Verifier
+from proposer import RandomProposer, NBCEProposer, NBCEOptimizeProposer
+from verifier import Verifier, VerifierOptimizer
 
 import logging
 logger = logging.getLogger('generator_logger') 
@@ -16,12 +16,12 @@ logger.addHandler(handler)
 
              
 class Generator:
-    def __init__(self, model, tokenizer, chunker) -> None:
+    def __init__(self, model, tokenizer, chunker, proposer=None, verifier=None) -> None:
         self.model = model
         self.tokenizer = tokenizer
-        self.proposer = NBCEProposer(model, tokenizer, chunker)
+        self.proposer = NBCEProposer(model, tokenizer, chunker) if proposer is None else proposer
         # self.proposer = RandomProposer()
-        self.verifier = Verifier(model, tokenizer)
+        self.verifier = Verifier(model, tokenizer) if verifier is None else verifier
         
         # parameters
         self.max_propose_tokens = 16
@@ -40,8 +40,8 @@ class Generator:
 
     @torch.inference_mode()
     def generate(self, batch, max_tokens):
-        proposer_input = self.proposer.set_prompt(batch)
         verifier_input = self.verifier.set_prompt(batch)
+        proposer_input = self.proposer.set_prompt(batch, verifier_input.past_key_values)
         
         generated_token_cnt = 0
         generated_tokens = None
@@ -53,7 +53,7 @@ class Generator:
             verifier_input = self.verifier.prepare_input(proposer_output, 
                                                          verifier_input)
             
-            # forward n tokens on the model in the a single batch
+            # forward n tokens on the model in the a single run
             verifier_output = self.verifier.verify(verifier_input, self.max_propose_tokens)
             
             # compare selected tokens
@@ -83,12 +83,15 @@ class Generator:
 
 if __name__ == "__main__":
     # model_path = "/rscratch/zhendong/lily/longchat-7b-16k/"
-    model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
+    # model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
+    model_path = "facebook/opt-125m"
     model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
     chunker = DummyChunker()
-    generator = Generator(model, tokenizer, chunker)
+    generator = Generator(model, tokenizer, chunker, 
+                          NBCEOptimizeProposer(model, tokenizer, chunker),
+                          VerifierOptimizer(model, tokenizer))
     prompts = ["Do you like travelling? If yes, give me three reasons." ,
               "Give me a five day hawaii travel plan",
               "Describe a city you live in"]
@@ -104,7 +107,7 @@ if __name__ == "__main__":
     generated = []
     start = time.time()
     for prompt in prompts:
-        generated.append(generator.generate(prompt, 100)[0])
+        generated.append(generator.generate([prompt], 100)[0])
     print(f"time: {time.time() - start}, generated: {generated}")
     
     ref_generated = []
