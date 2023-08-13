@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, LlamaForCausalLM
 from chunker import DummyChunker
 from common import OutputAndCache
 from proposer import RandomProposer, NBCEProposer, NBCEOptimizeProposer
-from verifier import Verifier, VerifierOptimizer
+from verifier import Verifier, OptimizeVerifier
 
 import logging
 logger = logging.getLogger('generator_logger') 
@@ -36,6 +36,7 @@ class Generator:
         # after cumsum: [[0, 0, 1]]
         # after < 1: [[1, 1, 0]]
         n_matches = ((~(proposed_output.output_ids == verified_output.output_ids[:, :-1])).cumsum(dim=-1) < 1).sum()
+        n_matches = proposed_output.output_ids.shape[-1]
         return verified_output.output_ids[:, :n_matches + 1]
 
     @torch.inference_mode()
@@ -91,8 +92,8 @@ if __name__ == "__main__":
     chunker = DummyChunker()
     generator = Generator(model, tokenizer, chunker, 
                           NBCEOptimizeProposer(model, tokenizer, chunker),
-                          VerifierOptimizer(model, tokenizer))
-    prompts = ["Do you like travelling? If yes, give me three reasons." ,
+                          OptimizeVerifier(model, tokenizer))
+    prompts = ["Do you like travelling? If yes, give me three ." ,
               "Give me a five day hawaii travel plan",
               "Describe a city you live in"]
     

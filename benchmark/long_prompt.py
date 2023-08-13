@@ -6,6 +6,10 @@ import torch
 from fastchat.model import load_model
 import matplotlib.pyplot as plt
 import pickle as pk
+from generator import Generator
+from verifier import OptimizeVerifier
+from proposer import NBCEOptimizeProposer
+from chunker import DummyChunker
 
 import sys
 sys.path.append('.')
@@ -32,10 +36,10 @@ def prepare_input(tokenizer, prompt_len, single_prompt):
         input_ids = torch.cat([input_ids, input_ids], dim=-1)
     prompt = tokenizer.batch_decode(input_ids[:, :prompt_len])
     inputs = tokenizer(prompt, return_tensors="pt").to('cuda')
-    return inputs
+    return inputs, prompt
 
 def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
-    input = prepare_input(tokenizer, prompt_len, single_prompt)
+    input, _ = prepare_input(tokenizer, prompt_len, single_prompt)
     input_ids, attention_mask, past_key_values = input.input_ids, input.attention_mask, None
     token_times = [0] * decode_len
     repeat = 5
@@ -51,6 +55,14 @@ def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
             attention_mask = torch.cat([attention_mask, torch.ones(1, 1, dtype=torch.long, device="cuda")], dim=-1)
             
     return [t * 1.0 / repeat for t in token_times]  
+
+def bench_optimize_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
+    input, prompt = prepare_input(tokenizer, prompt_len, single_prompt)
+    chunker = DummyChunker()
+    generator = Generator(model, tokenizer, chunker, 
+                          NBCEOptimizeProposer(model, tokenizer, chunker),
+                          OptimizeVerifier(model, tokenizer))
+    generator.generate([prompt], )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
