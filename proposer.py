@@ -46,7 +46,7 @@ class RandomProposer(Proposer):
     def __init__(self) -> None:
         super().__init__()
     
-    def set_prompt(self, prompts: List[str]) -> InputAndCache:
+    def set_prompt(self, prompts: List[str], past_key_values: torch.Tensor) -> InputAndCache:
         pass
     
     def propose_impl(self, input: InputAndCache, n: int) -> OutputAndCache:
@@ -67,7 +67,7 @@ class NBCEProposer(Proposer):
         self.processors = LogitsProcessorList()
         self.processors.append(TopPLogitsWarper(0.95))
     
-    def set_prompt(self, prompts: List[str]) -> InputAndCache:
+    def set_prompt(self, prompts: List[str], past_key_values: torch.Tensor) -> InputAndCache:
         if len(prompts) > 1:
             raise NotImplementedError()
         prompt = prompts[0]
@@ -140,29 +140,32 @@ class NBCEProposer(Proposer):
     
 class NBCEOptimizeProposer(NBCEProposer):
     def __init__(self, model, tokenizer, chunker) -> None:
-        super().__init__()
+        super().__init__(model, tokenizer, chunker)
     
     def set_prompt(self, prompts: List[str], past_key_values) -> InputAndCache:
         if len(prompts) > 1:
             raise NotImplementedError()
     
         inputs = self.tokenizer(prompts, padding='longest', return_tensors='pt').to('cuda')
-        assert inputs.shape[1] == past_key_values[0][0].shape[2]
+        assert inputs.input_ids.shape[1] == past_key_values[0][0].shape[2]
         
-        seq_len = inputs.shape[-1]
+        seq_len = inputs.input_ids.shape[-1]
+        num_chunk = 2
         assert (seq_len % num_chunk) == 0
-        num_chunk = 8
         chunk_size = seq_len // num_chunk
         
         input_ids = []
         for i in range(num_chunk):
-            input_ids.append(inputs.input_ids[(i+1) * chunk_size])
-        input_ids = input_ids.reshape(-1, 1)
-        attention_mask = input_ids.attention_mask.reshape(num_chunk, chunk_size)
+            input_ids.append(inputs.input_ids[0, (i+1) * chunk_size - 1])
+        input_ids = torch.tensor(input_ids, device='cuda').reshape(-1, 1)
+        attention_mask = torch.cat([
+            inputs.attention_mask.reshape(num_chunk, chunk_size),
+            torch.ones((num_chunk, 1), dtype=torch.long, device='cuda')],
+                                   dim = -1)
         # reshape kv cache
         new_past = []
         for idx in range(len(past_key_values)):
-            bsz, num_head, seq_len, kv_dim = past_key_values[idx][0]
+            bsz, num_head, seq_len, kv_dim = past_key_values[idx][0].shape
             new_past.append(
                 (
                     past_key_values[idx][0].reshape(num_chunk * bsz, num_head, chunk_size, kv_dim),

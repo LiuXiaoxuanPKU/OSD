@@ -91,7 +91,7 @@ class VerifierOptimizer(Verifier):
         outputs = self.model(input_ids=self.prompt_inputs.input_ids, 
                              attention_mask=self.prompt_inputs.attention_mask, 
                              past_key_values=None)
-        next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1)
+        next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1).unsqueeze(0)
         bsz = self.prompt_inputs.attention_mask.shape[0]
         attention_mask = torch.cat([self.prompt_inputs.attention_mask, 
                                     torch.ones(bsz, 1, dtype=torch.long, device="cuda")], dim=-1)
