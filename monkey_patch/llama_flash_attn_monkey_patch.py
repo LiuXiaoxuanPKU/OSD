@@ -189,6 +189,10 @@ def topk_forward(self,
     return attn_output, attn_weights, past_key_value
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 1b6618e15a8725a1caad613a52cdc06c701525d1
 def forward(
     self,
     hidden_states: torch.Tensor,
