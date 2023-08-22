@@ -1,5 +1,6 @@
 import torch
 from transformers import Trainer
+from transformers.trainer_pt_utils import LabelSmoother
 
 class DistillTrainer(Trainer):
     def __init__(self, teacher_model, *args, **kwargs):
@@ -11,23 +12,28 @@ class DistillTrainer(Trainer):
         self.correct_cnt = 0
         self.total_cnt = 0
       
-    def soft_cross_entropy(self, predicts, targets):
+    def soft_cross_entropy(self, predicts, targets, padding_mask):
         student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
         targets_prob = torch.nn.functional.softmax(targets, dim=-1)
-        return (- targets_prob * student_likelihood).mean()
+        entropy = - targets_prob * student_likelihood
+        expand_mask = padding_mask.unsqueeze(-1).expand_as(entropy)
+        entropy.masked_fill_(expand_mask, 0)
+        mean_entropy = entropy.sum() / (~padding_mask).sum()
+        return mean_entropy
     
     def training_step(self, model, inputs):
         # Usual forward pass with the base model
         _, student_outputs = super().compute_loss(model, inputs, return_outputs=True)
-        
         # Forward pass with the larger model
         with torch.no_grad():
             teacher_outputs = self.teacher_model(**inputs)
         
+        padding_mask = inputs["labels"].eq(LabelSmoother.ignore_index)
         if self.loss_model == "soft_only":
             temperature = 1
             loss = self.soft_cross_entropy(student_outputs.logits / temperature,
-                                            teacher_outputs.logits / temperature)
+                                            teacher_outputs.logits / temperature,
+                                            padding_mask)
         else:
             raise NotImplementedError()
         
@@ -37,8 +43,7 @@ class DistillTrainer(Trainer):
         loss.backward()
         return loss.detach()
     
-    @torch.inference_mode()
-    def prediction_step_example(self, model, inputs, prediction_loss_only, ignore_keys=None):
+    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         n = 20
         with torch.no_grad():
             def get_correct_token(input_ids):
@@ -79,6 +84,10 @@ class DistillTrainer(Trainer):
             self.correct_cnt += correct_cnt
             self.total_cnt += n
             self.eval_step += 1
-            if self.eval_step % 100 == 0:
+            if self.eval_step % 10 == 0:
                 print(f"[{self.eval_step}] {self.correct_cnt}/{self.total_cnt}")
-            return super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
+                with open("out", "a") as f:
+                    f.write(f"[{self.eval_step}] {self.correct_cnt}/{self.total_cnt}\n")
+            
+            
+            return None, None, None

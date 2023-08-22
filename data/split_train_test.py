@@ -6,7 +6,7 @@ with open(filename, "r") as f:
     data = json.load(f)
 
 random.shuffle(data)
-split_idx = int(0.9 * len(data))
+split_idx = int(0.98 * len(data))
 
 train_data = data[:split_idx]
 eval_data = data[split_idx:]
