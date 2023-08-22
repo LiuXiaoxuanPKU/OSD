@@ -85,20 +85,20 @@ def preprocess(
     tokenizer: transformers.PreTrainedTokenizer,
 ) -> Dict:
     conv = get_conversation_template("vicuna")
-    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
-
+    roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
+    
     # Apply prompt templates
     conversations = []
     for i, source in enumerate(sources):
-        if roles[source[0]["from"]] != conv.roles[0]:
+        if roles[source[0]["role"]] != conv.roles[0]:
             # Skip the first one if it is not from human
             source = source[1:]
 
         conv.messages = []
         for j, sentence in enumerate(source):
-            role = roles[sentence["from"]]
+            role = roles[sentence["role"]]
             assert role == conv.roles[j % 2], f"{i}"
-            conv.append_message(role, sentence["value"])
+            conv.append_message(role, sentence["content"])
         conversations.append(conv.get_prompt())
 
     # Tokenize conversations
@@ -166,7 +166,7 @@ class SupervisedDataset(Dataset):
         super(SupervisedDataset, self).__init__()
 
         rank0_print("Formatting inputs...")
-        sources = [example["conversations"] for example in raw_data]
+        sources = [example["conversation"] for example in raw_data]
         data_dict = preprocess(sources, tokenizer)
 
         self.input_ids = data_dict["input_ids"]
@@ -203,7 +203,7 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        ret = preprocess([self.raw_data[i]["conversations"]], self.tokenizer)
+        ret = preprocess([self.raw_data[i]["conversation"]], self.tokenizer)
         ret = dict(
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
@@ -237,7 +237,7 @@ def make_supervised_data_module(
 
 def train():
     global local_rank
-    teacher_model_path = TODO
+    teacher_model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
@@ -265,11 +265,12 @@ def train():
     )
     # teacher model
     teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
-       teacher_model_path
+       teacher_model_path,
     )
+    teacher_model.cuda()
     
     tokenizer = transformers.AutoTokenizer.from_pretrained(
-        model_args.model_name_or_path,
+        teacher_model_path,
         cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
         padding_side="right",
@@ -286,8 +287,8 @@ def train():
     # )
     
     trainer = DistillTrainer(
-        model=model, tokenizer=tokenizer, args=training_args, **data_module
-        teacher_model = teacher_model,
+        model=model, tokenizer=tokenizer, teacher_model = teacher_model,
+        args=training_args, **data_module
     )
     
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
