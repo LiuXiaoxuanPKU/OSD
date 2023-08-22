@@ -38,6 +38,7 @@ class Generator:
         # after cumsum: [[0, 0, 1]]
         # after < 1: [[1, 1, 0]]
         n_matches = ((~(proposed_output.output_ids == verified_output.output_ids[:, :-1])).cumsum(dim=-1) < 1).sum()
+        # perfect match
         n_matches = proposed_output.output_ids.shape[-1]
         return verified_output.output_ids[:, :n_matches + 1]
 
@@ -90,13 +91,19 @@ class Generator:
         return self.tokenizer.batch_decode(generated_tokens)
     
     def __del__(self):
+        print(f"[Generator time: {self.generation_time}")
         print(f"[Max allocated memory]: {torch.cuda.max_memory_allocated() / 1024 / 1024} MB")
 
 
 if __name__ == "__main__":
-    # model_path = "/rscratch/zhendong/lily/longchat-7b-16k/"
+    model_path = "/data/longchat-7b-16k/"
     # model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
-    model_path = "facebook/opt-125m"
+    # model_path = "facebook/opt-125m"
+    from monkey_patch.llama_condense_monkey_patch import replace_llama_with_condense
+    from monkey_patch.llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
+    replace_llama_with_condense()
+    replace_llama_attn_with_flash_attn()
+    
     model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
@@ -104,30 +111,36 @@ if __name__ == "__main__":
     generator = Generator(model, tokenizer, chunker, 
                           NBCEOptimizeProposer(model, tokenizer, chunker),
                           OptimizeVerifier(model, tokenizer))
-    prompts = ["Do you like travelling? If yes, give me three ." ,
-              "Give me a five day hawaii travel plan",
-              "Describe a city you live in"]
-    
+    prompt = ("Could you tell me the main idea of the following paragraph: " +
+            "Motivation is useful for activities that are considered dull" + 
+            "(e.g., washing the dishes), whereas passion is the driving force " +
+            "for activities that have significance for us. " +
+            "Passion can be negative or positive, however. " +
+            "Negative passions, referred to as obsessive passions, " + 
+            "are maladaptive and lead to unhealthy behaviors; these types of " +
+            "passions should be avoided. On the other hand, positive, harmonious ")
+    prompts = [prompt]
     # warmup
     ref_generated = []
     start = time.time()
     for prompt in prompts:
         inputs = tokenizer([prompt], return_tensors="pt", padding=True).to(model.device)
-        ref_generated.append(model.generate(**inputs, max_new_tokens=100)[0])
+        ref_generated.append(model.generate(**inputs, max_new_tokens=100)[0][inputs.input_ids.shape[-1]:])
+    print(f"time: {time.time() - start}, ref_generated:",
+          f"{tokenizer.batch_decode(ref_generated)}")
+    
+    # generated = []
+    # start = time.time()
+    # for prompt in prompts:
+    #     generated.append(generator.generate([prompt], 100)[0])
+    # print(f"time: {time.time() - start}, generated: {generated}")
+    
+    # ref_generated = []
+    # start = time.time()
+    # for prompt in prompts:
+    #     inputs = tokenizer([prompt], return_tensors="pt", padding=True).to(model.device)
+    #     ref_generated.append(model.generate(**inputs, max_new_tokens=100)[0])
     # print(f"time: {time.time() - start}, ref_generated: {tokenizer.batch_decode(ref_generated)}")
-    
-    generated = []
-    start = time.time()
-    for prompt in prompts:
-        generated.append(generator.generate([prompt], 100)[0])
-    print(f"time: {time.time() - start}, generated: {generated}")
-    
-    ref_generated = []
-    start = time.time()
-    for prompt in prompts:
-        inputs = tokenizer([prompt], return_tensors="pt", padding=True).to(model.device)
-        ref_generated.append(model.generate(**inputs, max_new_tokens=100)[0])
-    print(f"time: {time.time() - start}, ref_generated: {tokenizer.batch_decode(ref_generated)}")
     
     
     

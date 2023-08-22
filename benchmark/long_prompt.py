@@ -1,5 +1,8 @@
 import json
 import os
+import sys
+sys.path.append(os.getcwd())
+
 import argparse
 import time
 import torch
@@ -10,9 +13,8 @@ from generator import Generator
 from verifier import OptimizeVerifier
 from proposer import NBCEOptimizeProposer
 from chunker import DummyChunker
-
-import sys
-sys.path.append('.')
+from common import sychronize_time
+import numpy as np
 
 @torch.inference_mode()
 def model_generate(model, input_ids, att_mask, past_key_values, position_ids=None):
@@ -34,28 +36,30 @@ def prepare_input(tokenizer, prompt_len, single_prompt):
     input_ids = tokenizer([single_prompt], return_tensors="pt").input_ids
     while input_ids.shape[-1] < prompt_len:
         input_ids = torch.cat([input_ids, input_ids], dim=-1)
-    prompt = tokenizer.batch_decode(input_ids[:, :prompt_len])
+    prompt = tokenizer.batch_decode(input_ids[:, :prompt_len - 2])
     inputs = tokenizer(prompt, return_tensors="pt").to('cuda')
     return inputs, prompt
 
 def bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
     input, _ = prepare_input(tokenizer, prompt_len, single_prompt)
     input_ids, attention_mask, past_key_values = input.input_ids, input.attention_mask, None
-    token_times = [0] * decode_len
-    repeat = 5
+    token_times = {}
+    repeat = 3
     bench_start = time.time()
     for _ in range(repeat):
-        for i in range(decode_len):
-            start = time.time()
+        for i in range(0, decode_len):
+            start = sychronize_time()
             next_token_id, _, past_key_values = model_generate(model, 
                                                                 input_ids,
                                                                 attention_mask, 
                                                                 past_key_values)
-            token_times[i] += time.time() - start
+            if i not in token_times:
+                token_times[i] = 0
+            token_times[i] += sychronize_time() - start
             input_ids = next_token_id.unsqueeze(0)
             attention_mask = torch.cat([attention_mask, torch.ones(1, 1, dtype=torch.long, device="cuda")], dim=-1)
     avg_time = (time.time() - bench_start) / repeat     
-    token_times = [t * 1.0 / repeat for t in token_times] 
+    token_times = [token_times[t] * 1.0 / repeat for t in token_times] 
     return token_times, avg_time
 
 def bench_optimize_speed(prompt_len, decode_len, model, tokenizer, single_prompt):
@@ -64,10 +68,10 @@ def bench_optimize_speed(prompt_len, decode_len, model, tokenizer, single_prompt
     generator = Generator(model, tokenizer, chunker, 
                           NBCEOptimizeProposer(model, tokenizer, chunker),
                           OptimizeVerifier(model, tokenizer))
-    repeat = 5
+    repeat = 1
     bench_start = time.time()
     for _ in range(repeat):
-        generator.generate([prompt], max_tokens=decode_len)
+        generator.generate(prompt, max_tokens=decode_len)
     avg_time = (time.time() - bench_start) / repeat
     return None, avg_time
 
@@ -86,19 +90,19 @@ if __name__ == "__main__":
     single_prompt = load_prompt(args.test_dir)
     
     # warmup
-    bench_token_speed(4 * 1024, 1, model, tokenizer, single_prompt)
+    bench_token_speed(4 * 1024, 2, model, tokenizer, single_prompt)
     
     results = {}
-    for prompt_len in range(16, 56, 8):
+    for prompt_len in range(16, 41, 8):
         print(f"========================={prompt_len}=======================")
         prompt_len = prompt_len * 1024
         decode_len = 64
-        # results[prompt_len], avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
-        _, avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
-        print(avg_time)
-        replace_llama_attn_with_flash_attn()
+        results[prompt_len], avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+        # _, avg_time = bench_optimize_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+        print(avg_time, results[prompt_len][0])
+        print(results[prompt_len], np.median(results[prompt_len][1:]))
     
-    # pk.dump(results, open("benchmark/bench.pk", "wb"))
+    # pk.dump(results, open("benchmark/full_bench.pk", "wb"))
     
     # # results = pk.load(open("benchmark/bench.pk", "rb"))
     # # print(results)

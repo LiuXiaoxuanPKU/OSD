@@ -15,13 +15,16 @@ class Verifier:
         self.prompt_inputs = None
         self.processor = LogitsProcessorList()
         
+        self.set_prompt_time = 0
         self.verify_time = 0
         self.prepare_input_time = 0
         self.adjust_input_time = 0
     
     def set_prompt(self, prompts) -> InputAndCache:
+        start = sychronize_time()
         self.prompt_inputs = self.tokenizer(prompts, padding="longest", return_tensors="pt").to(device="cuda")
         logger.debug(f"prompt input length: {self.prompt_inputs.input_ids.shape}")
+        self.set_prompt_time = sychronize_time() - start
         return InputAndCache(self.prompt_inputs.input_ids, self.prompt_inputs.attention_mask, None)
         
     def verify(self, input: InputAndCache, max_propose_tokens: int) -> Tuple[InputAndCache, torch.Tensor]:
@@ -81,13 +84,26 @@ class Verifier:
         return InputAndCache(verifier_input_ids, verifier_attn_masks, verifier_key_values)
     
     def __del__(self):
-        print(f"[Verifier] verify time: {self.verify_time}, adjust time: {self.adjust_input_time}, prepare input time: {self.prepare_input_time}")
+        print(f"[Verifier] verify time: {self.verify_time},",
+              f"set prompt time: {self.set_prompt_time}",
+              f"adjust time: {self.adjust_input_time}, prepare input time: {self.prepare_input_time}")
         
         
 class OptimizeVerifier(Verifier):
+    def prepare_input(self, proposer_output: OutputAndCache, 
+                            verifier_input: InputAndCache) -> InputAndCache:
+        pass
+    
+    def adjust_input(self, 
+                     accept_token_ids: torch.Tensor, 
+                     verifier_input: InputAndCache, 
+                     verifier_output: OutputAndCache) -> InputAndCache:
+        pass
+    
     def set_prompt(self, prompts) -> InputAndCache:
+        start = sychronize_time()
         self.prompt_inputs = self.tokenizer(prompts, padding="longest", return_tensors="pt").to(device="cuda")
-        logger.debug(f"prompt input length: {self.prompt_inputs.input_ids.shape}")
+        print(f"prompt input length: {self.prompt_inputs.input_ids.shape}")
         outputs = self.model(input_ids=self.prompt_inputs.input_ids, 
                              attention_mask=self.prompt_inputs.attention_mask, 
                              past_key_values=None)
@@ -95,4 +111,5 @@ class OptimizeVerifier(Verifier):
         bsz = self.prompt_inputs.attention_mask.shape[0]
         attention_mask = torch.cat([self.prompt_inputs.attention_mask, 
                                     torch.ones(bsz, 1, dtype=torch.long, device="cuda")], dim=-1)
+        self.set_prompt_time = sychronize_time() - start
         return InputAndCache(next_token, attention_mask, outputs.past_key_values)
