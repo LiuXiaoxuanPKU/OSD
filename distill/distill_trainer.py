@@ -11,8 +11,7 @@ class DistillTrainer(Trainer):
         self.correct_cnt = 0
         self.total_cnt = 0
       
-    @staticmethod  
-    def soft_cross_entropy(predicts, targets):
+    def soft_cross_entropy(self, predicts, targets):
         student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
         targets_prob = torch.nn.functional.softmax(targets, dim=-1)
         return (- targets_prob * student_likelihood).mean()
@@ -25,16 +24,20 @@ class DistillTrainer(Trainer):
         with torch.no_grad():
             teacher_outputs = self.teacher_model(**inputs)
         
-            if self.loss_model == "soft_only":
-                temperature = 1
-                loss = DistillTrainer.soft_cross_entropy(student_outputs.logits / temperature,
-                                                        teacher_outputs.logits / temperature)
-            else:
-                raise NotImplementedError()
+        if self.loss_model == "soft_only":
+            temperature = 1
+            loss = self.soft_cross_entropy(student_outputs.logits / temperature,
+                                            teacher_outputs.logits / temperature)
+        else:
+            raise NotImplementedError()
         
-        del student_outputs, teacher_outputs
-        return loss
+        if self.args.gradient_accumulation_steps > 1:
+            loss = loss / self.args.gradient_accumulation_steps
+
+        loss.backward()
+        return loss.detach()
     
+    @torch.inference_mode()
     def prediction_step_example(self, model, inputs, prediction_loss_only, ignore_keys=None):
         n = 20
         with torch.no_grad():
