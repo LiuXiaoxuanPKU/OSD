@@ -95,8 +95,8 @@ class Generator:
 
 if __name__ == "__main__":
     # model_path = "/rscratch/zhendong/lily/longchat-7b-16k/"
-    # model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
-    model_path = "facebook/opt-125m"
+    model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
+    # model_path = "facebook/opt-125m"
     model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
@@ -114,20 +114,20 @@ if __name__ == "__main__":
     for prompt in prompts:
         inputs = tokenizer([prompt], return_tensors="pt", padding=True).to(model.device)
         ref_generated.append(model.generate(**inputs, max_new_tokens=100)[0])
-    # print(f"time: {time.time() - start}, ref_generated: {tokenizer.batch_decode(ref_generated)}")
-    
-    generated = []
-    start = time.time()
-    for prompt in prompts:
-        generated.append(generator.generate([prompt], 100)[0])
-    print(f"time: {time.time() - start}, generated: {generated}")
-    
-    ref_generated = []
-    start = time.time()
-    for prompt in prompts:
-        inputs = tokenizer([prompt], return_tensors="pt", padding=True).to(model.device)
-        ref_generated.append(model.generate(**inputs, max_new_tokens=100)[0])
     print(f"time: {time.time() - start}, ref_generated: {tokenizer.batch_decode(ref_generated)}")
+    
+    # generated = []
+    # start = time.time()
+    # for prompt in prompts:
+    #     generated.append(generator.generate([prompt], 100)[0])
+    # print(f"time: {time.time() - start}, generated: {generated}")
+    
+    # ref_generated = []
+    # start = time.time()
+    # for prompt in prompts:
+    #     inputs = tokenizer([prompt], return_tensors="pt", padding=True).to(model.device)
+    #     ref_generated.append(model.generate(**inputs, max_new_tokens=100)[0])
+    # print(f"time: {time.time() - start}, ref_generated: {tokenizer.batch_decode(ref_generated)}")
     
     
     

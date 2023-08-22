@@ -89,16 +89,16 @@ if __name__ == "__main__":
     bench_token_speed(4 * 1024, 1, model, tokenizer, single_prompt)
     
     results = {}
-    for prompt_len in range(16, 56, 8):
+    for prompt_len in range(52, 56, 4):
         print(f"========================={prompt_len}=======================")
         prompt_len = prompt_len * 1024
         decode_len = 64
-        # results[prompt_len], avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
-        _, avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+        results[prompt_len], avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
+        # _, avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
         print(avg_time)
         replace_llama_attn_with_flash_attn()
     
-    # pk.dump(results, open("benchmark/bench.pk", "wb"))
+    pk.dump(results, open("benchmark/bench.pk", "wb"))
     
     # # results = pk.load(open("benchmark/bench.pk", "rb"))
     # # print(results)
