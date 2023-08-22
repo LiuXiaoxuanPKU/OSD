@@ -237,7 +237,7 @@ def make_supervised_data_module(
 
 def train():
     global local_rank
-    teacher_model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
+    teacher_model_path = "/data/longchat-7b-16k/"
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
@@ -264,8 +264,13 @@ def train():
         cache_dir=training_args.cache_dir,
     )
     # teacher model
+    teacher_config = transformers.AutoConfig.from_pretrained(
+        teacher_model_path,
+        cache_dir=training_args.cache_dir,
+    )
     teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
        teacher_model_path,
+       config=teacher_config
     )
     teacher_model.cuda()
     
@@ -278,6 +283,7 @@ def train():
     )
     tokenizer.pad_token = tokenizer.unk_token
 
+    print(data_args)
     # Load data
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
 

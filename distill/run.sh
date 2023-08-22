@@ -1,14 +1,15 @@
 python distill/train.py \
     --model_name_or_path JackFram/llama-160m  \
-    --data_path data/clean_chat_clean_conv_20230809_10k.json \
+    --data_path data/train.json \
+    --eval_data_path data/eval.json \
     --bf16 True \
     --output_dir output \
     --num_train_epochs 3 \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 2 \
-    --gradient_accumulation_steps 16 \
+    --per_device_train_batch_size 4 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 4 \
     --evaluation_strategy "steps" \
-    --eval_steps "10" \
+    --eval_steps 10 \
     --save_strategy "steps" \
     --save_steps 1000 \
     --save_total_limit 10 \
