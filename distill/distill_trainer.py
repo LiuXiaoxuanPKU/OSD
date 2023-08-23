@@ -10,7 +10,7 @@ class DistillTrainer(Trainer):
         
         self.eval_step = 0
         self.correct_cnt = 0
-        self.total_cnt = 0
+        self.propose_cnt = 0
       
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
@@ -76,18 +76,16 @@ class DistillTrainer(Trainer):
                 # after cumsum: [[0, 0, 1]]
                 # after < 1: [[1, 1, 0]]
                 n_matches = ((~(propose_tokens == verifier_tokens[:, :-1])).cumsum(dim=-1) < 1).sum()
-                return n_matches
+                return n_matches, propose_tokens.shape[-1]
     
-            correct_cnt = get_correct_token(inputs['input_ids'])
-            # avg_correct_cnt = correct_cnt / inputs['input_ids'].shape[0]
-            # print(f"average correct count: {avg_correct_cnt}/{n}")
-            self.correct_cnt += correct_cnt
-            self.total_cnt += n
-            self.eval_step += 1
-            if self.eval_step % 10 == 0:
-                print(f"[{self.eval_step}] {self.correct_cnt}/{self.total_cnt}")
-                with open("out", "a") as f:
-                    f.write(f"[{self.eval_step}] {self.correct_cnt}/{self.total_cnt}\n")
-            
-            
+            n_matches, propose_cnt = get_correct_token(inputs['input_ids'])
+            self.correct_cnt += n_matches
+            self.propose_cnt += propose_cnt     
             return None, None, None
+        
+    def on_evaluate(self):
+        super().on_evaluate()
+        print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
+        with open("out", "a") as f:
+            f.write(f"[{self.eval_step}] {self.correct_cnt}/{self.total_cnt}\n")
+        self.eval_step += 1
