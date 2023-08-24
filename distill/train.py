@@ -30,7 +30,7 @@ from transformers.trainer_pt_utils import LabelSmoother
 from fastchat.conversation import SeparatorStyle
 from fastchat.model.model_adapter import get_conversation_template
 
-from distill_trainer import DistillTrainer
+from distill_trainer import DistillTrainer, DistillTrainerCallback
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
@@ -83,10 +83,15 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 def preprocess(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
+    do_eval: bool
 ) -> Dict:
     conv = get_conversation_template("vicuna")
     roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
     
+    if do_eval:
+        assert len(sources) == 1
+        sources[0].append({'role': 'assistant', 'content': ''})
+
     # Apply prompt templates
     conversations = []
     for i, source in enumerate(sources):
@@ -100,7 +105,7 @@ def preprocess(
             assert role == conv.roles[j % 2], f"{i}"
             conv.append_message(role, sentence["content"])
         conversations.append(conv.get_prompt())
-
+        
     # Tokenize conversations
     input_ids = tokenizer(
         conversations,
@@ -110,6 +115,13 @@ def preprocess(
         truncation=True,
     ).input_ids
     targets = input_ids.clone()
+    
+    if do_eval:
+        return dict(
+            input_ids=input_ids,
+            labels=targets,
+            attention_mask=input_ids.ne(tokenizer.pad_token_id),
+        )
 
     assert conv.sep_style == SeparatorStyle.ADD_COLON_TWO
 
@@ -187,7 +199,7 @@ class SupervisedDataset(Dataset):
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
-    def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer):
+    def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer, do_eval : bool = False):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
 
@@ -195,6 +207,7 @@ class LazySupervisedDataset(Dataset):
         self.tokenizer = tokenizer
         self.raw_data = raw_data
         self.cached_data_dict = {}
+        self.do_eval = do_eval
 
     def __len__(self):
         return len(self.raw_data)
@@ -203,7 +216,7 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        ret = preprocess([self.raw_data[i]["conversation"]], self.tokenizer)
+        ret = preprocess([self.raw_data[i]["conversation"]], self.tokenizer, self.do_eval)
         ret = dict(
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
@@ -228,7 +241,7 @@ def make_supervised_data_module(
 
     if data_args.eval_data_path:
         eval_json = json.load(open(data_args.eval_data_path, "r"))
-        eval_dataset = dataset_cls(eval_json, tokenizer=tokenizer)
+        eval_dataset = dataset_cls(eval_json, tokenizer=tokenizer, do_eval=True)
     else:
         eval_dataset = None
 
@@ -237,7 +250,8 @@ def make_supervised_data_module(
 
 def train():
     global local_rank
-    teacher_model_path = "/data/longchat-7b-16k/"
+    # teacher_model_path = "/data/longchat-7b-16k/"
+    teacher_model_path = "/data/vicuna-7b-v1.3/"
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
@@ -296,6 +310,7 @@ def train():
         model=model, tokenizer=tokenizer, teacher_model = teacher_model,
         args=training_args, **data_module
     )
+    trainer.add_callback(DistillTrainerCallback)
     
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)

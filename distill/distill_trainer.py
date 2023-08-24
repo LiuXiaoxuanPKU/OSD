@@ -1,16 +1,13 @@
 import torch
-from transformers import Trainer
+from transformers import Trainer, TrainerCallback
 from transformers.trainer_pt_utils import LabelSmoother
+import wandb
 
 class DistillTrainer(Trainer):
     def __init__(self, teacher_model, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.teacher_model = teacher_model
         self.loss_model = "soft_only"
-        
-        self.eval_step = 0
-        self.correct_cnt = 0
-        self.propose_cnt = 0
       
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
@@ -65,9 +62,10 @@ class DistillTrainer(Trainer):
                 
                 ######### verify #########
                 # prepare input
-                input_ids = torch.cat([input_ids, propose_tokens], dim=-1)
+                teacher_input_ids = torch.cat([input_ids, propose_tokens], dim=-1)
                 # batch inference
-                outputs = self.teacher_model(input_ids=input_ids)
+                outputs = self.teacher_model(input_ids=teacher_input_ids)
+                # print(outputs.logits[:, -(i+1):, :].topk(5, dim=-1))
                 verifier_tokens = torch.argmax(outputs.logits[:, -(i+1):, :], dim=-1)
             
                 ######### get correct tokens #########
@@ -79,13 +77,29 @@ class DistillTrainer(Trainer):
                 return n_matches, propose_tokens.shape[-1]
     
             n_matches, propose_cnt = get_correct_token(inputs['input_ids'])
-            self.correct_cnt += n_matches
-            self.propose_cnt += propose_cnt     
+            
+            find = False
+            for callback in self.callback_handler.callbacks:
+                if isinstance(callback, DistillTrainerCallback):
+                    callback.correct_cnt += n_matches
+                    callback.propose_cnt += propose_cnt
+                    find = True
+            assert find
+
             return None, None, None
+
+class DistillTrainerCallback(TrainerCallback):
+    def __init__(self) -> None:
+        super().__init__()
+        self.eval_step = 0
+        self.correct_cnt = 0
+        self.propose_cnt = 0
         
-    def on_evaluate(self):
-        super().on_evaluate()
+    def on_evaluate(self, args, state, control, **kwargs):
         print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
         with open("out", "a") as f:
-            f.write(f"[{self.eval_step}] {self.correct_cnt}/{self.total_cnt}\n")
+            f.write(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
+        wandb.log({"eval_correctness": self.correct_cnt * 1.0/self.propose_cnt})
         self.eval_step += 1
+        self.correct_cnt = 0
+        self.propose_cnt = 0
