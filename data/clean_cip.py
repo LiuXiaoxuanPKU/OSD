@@ -1,26 +1,27 @@
 from datasets import load_dataset
 import json
+import random
 
-dataset = load_dataset("alespalla/chatbot_instruction_prompts")
+# dataset = load_dataset("alespalla/chatbot_instruction_prompts")
 
-# Access different splits
-dataset["train"].to_json("cip_train_raw.json")
-dataset["test"].to_json("cip_eval_raw.json")
+# # Access different splits
+# dataset["train"].to_json("cip_train_raw.json")
+# dataset["test"].to_json("cip_eval_raw.json")
 
 def load_transform(filename, prefix):
     def transform(i, case):
         case["id"] = f"{prefix}_identity_{i}"
-        case["conversations"] = [
+        case["conversation"] = [
             {
-                "from" : "human",
-                "value" : case["prompt"]
+                "role" : "user",
+                "content" : case["prompt"]
             },
             {
-                "from" : "gpt",
-                "value" : case["response"]
+                "role" : "assistant",
+                "content" : case["response"]
             }
         ]
-        case = {k: case[k] for k in ["id", "conversations"]}
+        case = {k: case[k] for k in ["id", "conversation"]}
         return case
     
     with open(filename, "r") as f:
@@ -35,9 +36,12 @@ def load_transform(filename, prefix):
 
 train_cases = load_transform("cip_train_raw.json", "train")
 eval_cases = load_transform("cip_eval_raw.json", "eval")
+# sample 200 cases only
+random.shuffle(eval_cases)
+eval_cases = eval_cases[:200]
 
-with open('train.json', 'w') as f:
+with open('cip_train.json', 'w') as f:
     json.dump(train_cases, f)
         
-with open('eval.json', 'w') as f:
+with open('cip_eval.json', 'w') as f:
     json.dump(eval_cases, f)
