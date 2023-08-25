@@ -8,7 +8,7 @@ def sample_from_interval(data, start_time, end_time):
 
 def extract_first_prompt(d):
     assert d['conversation'][0]['role'] == 'user'
-    # d['conversation'] = [d['conversation'][0]]
+    d['conversation'] = [d['conversation'][0]]
     return d
 
 filename = "clean_chat_clean_conv_20230809_10k.json"

@@ -2,12 +2,15 @@ import torch
 from transformers import Trainer, TrainerCallback
 from transformers.trainer_pt_utils import LabelSmoother
 import wandb
+from specInfer.generator import Generator
 
 class DistillTrainer(Trainer):
     def __init__(self, teacher_model, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.teacher_model = teacher_model
         self.loss_model = "soft_only"
+        self.eval_cnt = 0
+        self.generator = Generator(self.model, self.teacher_model, self.tokenizer)
       
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
@@ -41,52 +44,16 @@ class DistillTrainer(Trainer):
         return loss.detach()
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        n = 20
-        with torch.no_grad():
-            def get_correct_token(input_ids):
-                if input_ids.shape[0] > 1:
-                    raise NotImplementedError("Not implement for batch_size > 1 in evaluation")
-                ######### propose #########
-                propose_tokens = []
-                i = 0
-                student_input_ids = input_ids
-                while True:
-                    outputs = model(student_input_ids)
-                    next_tokens = torch.argmax(outputs.logits[:, -1, :], dim=-1)
-                    propose_tokens.append(next_tokens[0].item())
-                    i += 1     
-                    if next_tokens[0] == self.tokenizer.eos_token_id or i == n:
-                        break
-                    student_input_ids = torch.cat([student_input_ids, next_tokens.reshape(1, 1)], dim=-1)
-                propose_tokens = torch.tensor(propose_tokens, device=input_ids.device).reshape(1, -1)
-                
-                ######### verify #########
-                # prepare input
-                teacher_input_ids = torch.cat([input_ids, propose_tokens], dim=-1)
-                # batch inference
-                outputs = self.teacher_model(input_ids=teacher_input_ids)
-                # print(outputs.logits[:, -(i+1):, :].topk(5, dim=-1))
-                verifier_tokens = torch.argmax(outputs.logits[:, -(i+1):, :], dim=-1)
-            
-                ######### get correct tokens #########
-                # a = [[1, 2, 3]], b = [[1, 2, 4]]
-                # ~(a == b): [[0, 0, 1]]
-                # after cumsum: [[0, 0, 1]]
-                # after < 1: [[1, 1, 0]]
-                n_matches = ((~(propose_tokens == verifier_tokens[:, :-1])).cumsum(dim=-1) < 1).sum()
-                return n_matches, propose_tokens.shape[-1]
-    
-            n_matches, propose_cnt = get_correct_token(inputs['input_ids'])
-            
-            find = False
-            for callback in self.callback_handler.callbacks:
-                if isinstance(callback, DistillTrainerCallback):
-                    callback.correct_cnt += n_matches
-                    callback.propose_cnt += propose_cnt
-                    find = True
-            assert find
+        output, n_matches, propose_cnt = self.generator.generate(inputs["input_ids"], 200)
+        find = False
+        for callback in self.callback_handler.callbacks:
+            if isinstance(callback, DistillTrainerCallback):
+                callback.correct_cnt += n_matches
+                callback.propose_cnt += propose_cnt
+                find = True
+        assert find
 
-            return None, None, None
+        return None, None, None
 
 class DistillTrainerCallback(TrainerCallback):
     def __init__(self) -> None:

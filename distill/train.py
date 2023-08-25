@@ -117,12 +117,27 @@ def preprocess(
     targets = input_ids.clone()
     
     if do_eval:
+        input_ids = tokenizer(
+            conversations,
+            return_tensors="pt",
+            truncation=True,
+        ).input_ids
         return dict(
             input_ids=input_ids,
-            labels=targets,
+            labels=input_ids.clone(),
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
         )
-
+    else:
+        # Tokenize conversations
+        input_ids = tokenizer(
+            conversations,
+            return_tensors="pt",
+            padding="max_length",
+            max_length=tokenizer.model_max_length,
+            truncation=True,
+        ).input_ids
+    targets = input_ids.clone()
+    
     assert conv.sep_style == SeparatorStyle.ADD_COLON_TWO
 
     # Mask targets. Only compute loss on the assistant outputs.
@@ -282,6 +297,8 @@ def train():
         teacher_model_path,
         cache_dir=training_args.cache_dir,
     )
+    # teacher_config.rope_scaling = {"type": "linear", "factor": 8}
+    # teacher_config.use_cache = False
     teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
        teacher_model_path,
        config=teacher_config
