@@ -11,16 +11,26 @@ import random
 def load_transform(filename, prefix):
     def transform(i, case):
         case["id"] = f"{prefix}_identity_{i}"
-        case["conversation"] = [
-            {
-                "role" : "user",
-                "content" : case["prompt"]
-            },
-            {
-                "role" : "assistant",
-                "content" : case["response"]
-            }
-        ]
+        if prefix == "train":
+            case["conversation"] = [
+                {
+                    "role" : "user",
+                    "content" : case["prompt"]
+                },
+                {
+                    "role" : "assistant",
+                    "content" : case["response"]
+                }
+            ]
+        elif prefix == "eval":
+            case["conversation"] = [
+                {
+                    "role" : "user",
+                    "content" : case["prompt"]
+                }
+            ]
+        else:
+            raise ValueError(prefix)
         case = {k: case[k] for k in ["id", "conversation"]}
         return case
     
