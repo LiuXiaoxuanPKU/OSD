@@ -44,7 +44,7 @@ class Generator:
         proposer_input = InputAndCache(input_ids, torch.ones_like(input_ids), None)
         verifier_input = InputAndCache(input_ids, torch.ones_like(input_ids), None)
         
-        correct_cnt = 0
+        correct_tokens = None
         propose_steps = 0
         while True:
             start = sychronize_time()
@@ -67,7 +67,11 @@ class Generator:
             else:
                 generated_tokens = torch.cat([generated_tokens, accept_token_ids], dim=-1)
             generated_token_cnt += accept_token_ids.shape[1]
-            correct_cnt += accept_token_ids.shape[1] - 1
+            if correct_tokens is None:
+                correct_tokens = accept_token_ids[:, :-1]
+            else:
+                correct_tokens = torch.cat([correct_tokens, accept_token_ids[:, :-1]], dim=-1)
+                
             
             # adjust the proposer/verifier input, discard unnecessary kv cache
             proposer_input = self.proposer.adjust_input(accept_token_ids, proposer_input, proposer_output)
@@ -81,7 +85,7 @@ class Generator:
             logger.debug("================================")
         logger.debug(generated_tokens)
         logger.info(f"generated tokens: {generated_tokens.shape}")
-        return self.tokenizer.batch_decode(generated_tokens), correct_cnt, propose_steps
+        return self.tokenizer.batch_decode(generated_tokens), correct_tokens, propose_steps
     
     def __del__(self):
         # print(f"[Generator time: {self.generation_time}")
