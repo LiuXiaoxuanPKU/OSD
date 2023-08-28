@@ -1,4 +1,4 @@
-## Run experiments
+## Distill
 1. prepare data
 ```
 cd data
@@ -9,4 +9,10 @@ python clean_cip.py
 ```
 cd ..
 bash bash_scripts/run_cip.sh
+```
+
+
+## Compare Models
+```
+python distill/compare_model.py
 ```
