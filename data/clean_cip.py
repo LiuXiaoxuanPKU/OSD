@@ -2,11 +2,11 @@ from datasets import load_dataset
 import json
 import random
 
-# dataset = load_dataset("alespalla/chatbot_instruction_prompts")
+dataset = load_dataset("alespalla/chatbot_instruction_prompts")
 
-# # Access different splits
-# dataset["train"].to_json("cip_train_raw.json")
-# dataset["test"].to_json("cip_eval_raw.json")
+# Access different splits
+dataset["train"].to_json("cip_train_raw.json")
+dataset["test"].to_json("cip_eval_raw.json")
 
 def load_transform(filename, prefix):
     def transform(i, case):
