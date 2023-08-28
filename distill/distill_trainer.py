@@ -44,11 +44,11 @@ class DistillTrainer(Trainer):
         return loss.detach()
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output, n_matches, propose_cnt = self.generator.generate(inputs["input_ids"], 200)
+        output, matches, propose_cnt = self.generator.generate(inputs["input_ids"], 200)
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, DistillTrainerCallback):
-                callback.correct_cnt += n_matches
+                callback.correct_cnt += matches.shape[-1]
                 callback.propose_cnt += propose_cnt
                 find = True
         assert find

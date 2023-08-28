@@ -83,51 +83,57 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 def preprocess(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
+    model: str,
     do_eval: bool
 ) -> Dict:
-    conv = get_conversation_template("vicuna")
-    roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
-    
-    if do_eval:
+    if "llama" in model.lower():
+        # does not support multi-round conversation for llama
         assert len(sources) == 1
-        sources[0].append({'role': 'assistant', 'content': ''})
-
-    # Apply prompt templates
-    conversations = []
-    for i, source in enumerate(sources):
-        if roles[source[0]["role"]] != conv.roles[0]:
-            # Skip the first one if it is not from human
-            source = source[1:]
-
-        conv.messages = []
-        for j, sentence in enumerate(source):
-            role = roles[sentence["role"]]
-            assert role == conv.roles[j % 2], f"{i}"
-            conv.append_message(role, sentence["content"])
-        conversations.append(conv.get_prompt())
-        
-    # Tokenize conversations
-    input_ids = tokenizer(
-        conversations,
-        return_tensors="pt",
-        padding="max_length",
-        max_length=tokenizer.model_max_length,
-        truncation=True,
-    ).input_ids
-    targets = input_ids.clone()
-    
-    if do_eval:
-        input_ids = tokenizer(
-            conversations,
-            return_tensors="pt",
-            truncation=True,
-        ).input_ids
+        # print(sources)
+        conversations = [sources[0][0]["content"]]
+        if do_eval:
+            input_ids = tokenizer(
+                conversations,
+                return_tensors="pt",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+            ).input_ids
+        else:
+            input_ids = tokenizer(
+                conversations,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+            ).input_ids
+        targets = input_ids.clone()    
         return dict(
             input_ids=input_ids,
-            labels=input_ids.clone(),
+            labels=targets,
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
         )
-    else:
+    elif "vicuna" in model.lower():
+        conv = get_conversation_template(model)
+        roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
+        
+        if do_eval:
+            assert len(sources) == 1
+            sources[0].append({'role': 'assistant', 'content': ''})
+
+        # Apply prompt templates
+        conversations = []
+        for i, source in enumerate(sources):
+            if roles[source[0]["role"]] != conv.roles[0]:
+                # Skip the first one if it is not from human
+                source = source[1:]
+
+            conv.messages = []
+            for j, sentence in enumerate(source):
+                role = roles[sentence["role"]]
+                assert role == conv.roles[j % 2], f"{i}"
+                conv.append_message(role, sentence["content"])
+            conversations.append(conv.get_prompt())
+            
         # Tokenize conversations
         input_ids = tokenizer(
             conversations,
@@ -136,85 +142,86 @@ def preprocess(
             max_length=tokenizer.model_max_length,
             truncation=True,
         ).input_ids
-    targets = input_ids.clone()
-    
-    assert conv.sep_style == SeparatorStyle.ADD_COLON_TWO
+        targets = input_ids.clone()
+        
+        if do_eval:
+            input_ids = tokenizer(
+                conversations,
+                return_tensors="pt",
+                truncation=True,
+            ).input_ids
+            return dict(
+                input_ids=input_ids,
+                labels=input_ids.clone(),
+                attention_mask=input_ids.ne(tokenizer.pad_token_id),
+            )
+        else:
+            # Tokenize conversations
+            input_ids = tokenizer(
+                conversations,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+            ).input_ids
+        targets = input_ids.clone()
+        
+        assert conv.sep_style == SeparatorStyle.ADD_COLON_TWO
 
-    # Mask targets. Only compute loss on the assistant outputs.
-    sep = conv.sep + conv.roles[1] + ": "
-    for conversation, target in zip(conversations, targets):
-        total_len = int(target.ne(tokenizer.pad_token_id).sum())
+        # Mask targets. Only compute loss on the assistant outputs.
+        sep = conv.sep + conv.roles[1] + ": "
+        for conversation, target in zip(conversations, targets):
+            total_len = int(target.ne(tokenizer.pad_token_id).sum())
 
-        turns = conversation.split(conv.sep2)
-        cur_len = 1
-        target[:cur_len] = IGNORE_TOKEN_ID
-        for i, turn in enumerate(turns):
-            if turn == "":
-                break
-            turn_len = len(tokenizer(turn).input_ids)
+            turns = conversation.split(conv.sep2)
+            cur_len = 1
+            target[:cur_len] = IGNORE_TOKEN_ID
+            for i, turn in enumerate(turns):
+                if turn == "":
+                    break
+                turn_len = len(tokenizer(turn).input_ids)
 
-            parts = turn.split(sep)
-            if len(parts) != 2:
-                break
-            parts[0] += sep
-            # "-2" is hardcoded for the LLaMA tokenizer to make the offset correct.
-            instruction_len = len(tokenizer(parts[0]).input_ids) - 2
+                parts = turn.split(sep)
+                if len(parts) != 2:
+                    break
+                parts[0] += sep
+                # "-2" is hardcoded for the LLaMA tokenizer to make the offset correct.
+                instruction_len = len(tokenizer(parts[0]).input_ids) - 2
 
-            # Ignore the user instructions
-            target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
-            cur_len += turn_len
+                # Ignore the user instructions
+                target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
+                cur_len += turn_len
 
-        target[cur_len:] = IGNORE_TOKEN_ID
+            target[cur_len:] = IGNORE_TOKEN_ID
 
-        if False:  # Inspect and check the correctness of masking
-            z = target.clone()
-            z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
-            rank0_print(tokenizer.decode(z))
+            if False:  # Inspect and check the correctness of masking
+                z = target.clone()
+                z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
+                rank0_print(tokenizer.decode(z))
 
-        if cur_len < tokenizer.model_max_length:
-            if cur_len != total_len:
-                target[:] = IGNORE_TOKEN_ID
-                rank0_print(
-                    f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
-                    f" (ignored)"
-                )
+            if cur_len < tokenizer.model_max_length:
+                if cur_len != total_len:
+                    target[:] = IGNORE_TOKEN_ID
+                    rank0_print(
+                        f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
+                        f" (ignored)"
+                    )
 
-    return dict(
-        input_ids=input_ids,
-        labels=targets,
-        attention_mask=input_ids.ne(tokenizer.pad_token_id),
-    )
-
-
-class SupervisedDataset(Dataset):
-    """Dataset for supervised fine-tuning."""
-
-    def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer):
-        super(SupervisedDataset, self).__init__()
-
-        rank0_print("Formatting inputs...")
-        sources = [example["conversation"] for example in raw_data]
-        data_dict = preprocess(sources, tokenizer)
-
-        self.input_ids = data_dict["input_ids"]
-        self.labels = data_dict["labels"]
-        self.attention_mask = data_dict["attention_mask"]
-
-    def __len__(self):
-        return len(self.input_ids)
-
-    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         return dict(
-            input_ids=self.input_ids[i],
-            labels=self.labels[i],
-            attention_mask=self.attention_mask[i],
+            input_ids=input_ids,
+            labels=targets,
+            attention_mask=input_ids.ne(tokenizer.pad_token_id),
         )
-
+    else:
+        raise NotImplementedError(f"Does not support prompt template for {model}")
 
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
-    def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer, do_eval : bool = False):
+    def __init__(self, raw_data, 
+                 tokenizer: transformers.PreTrainedTokenizer,
+                 model: str,
+                 do_eval : bool = False):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
 
@@ -223,6 +230,7 @@ class LazySupervisedDataset(Dataset):
         self.raw_data = raw_data
         self.cached_data_dict = {}
         self.do_eval = do_eval
+        self.model = model
 
     def __len__(self):
         return len(self.raw_data)
@@ -231,7 +239,10 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        ret = preprocess([self.raw_data[i]["conversation"]], self.tokenizer, self.do_eval)
+        ret = preprocess([self.raw_data[i]["conversation"]], 
+                         self.tokenizer, 
+                         self.model,
+                         self.do_eval)
         ret = dict(
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
@@ -243,7 +254,9 @@ class LazySupervisedDataset(Dataset):
 
 
 def make_supervised_data_module(
-    tokenizer: transformers.PreTrainedTokenizer, data_args
+    tokenizer: transformers.PreTrainedTokenizer, 
+    data_args,
+    model: str
 ) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
     dataset_cls = (
@@ -252,11 +265,16 @@ def make_supervised_data_module(
     rank0_print("Loading data...")
 
     train_json = json.load(open(data_args.data_path, "r"))
-    train_dataset = dataset_cls(train_json, tokenizer=tokenizer)
+    train_dataset = dataset_cls(train_json, 
+                                tokenizer=tokenizer,
+                                model=model)
 
     if data_args.eval_data_path:
         eval_json = json.load(open(data_args.eval_data_path, "r"))
-        eval_dataset = dataset_cls(eval_json, tokenizer=tokenizer, do_eval=True)
+        eval_dataset = dataset_cls(eval_json, 
+                                   tokenizer=tokenizer,
+                                   model=model,
+                                   do_eval=True)
     else:
         eval_dataset = None
 
@@ -266,7 +284,7 @@ def make_supervised_data_module(
 def train():
     global local_rank
     # teacher_model_path = "/data/longchat-7b-16k/"
-    teacher_model_path = "/data/vicuna-7b-v1.3/"
+    teacher_model_path = "/rscratch/zhendong/lily/llama-7b/"
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
@@ -316,7 +334,9 @@ def train():
 
     print(data_args)
     # Load data
-    data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
+    data_module = make_supervised_data_module(tokenizer=tokenizer, 
+                                              data_args=data_args,
+                                              model=teacher_model_path)
 
     # Start trainner
     # trainer = Trainer(

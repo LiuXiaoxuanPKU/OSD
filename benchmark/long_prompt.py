@@ -93,28 +93,16 @@ if __name__ == "__main__":
     bench_token_speed(4 * 1024, 2, model, tokenizer, single_prompt)
     
     results = {}
-<<<<<<< HEAD:benchmark/long_prompt.py
     for prompt_len in range(16, 41, 8):
-=======
-    for prompt_len in range(52, 56, 4):
->>>>>>> 1b6618e15a8725a1caad613a52cdc06c701525d1:chunk/benchmark/long_prompt.py
         print(f"========================={prompt_len}=======================")
         prompt_len = prompt_len * 1024
         decode_len = 64
         results[prompt_len], avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
-<<<<<<< HEAD:benchmark/long_prompt.py
         # _, avg_time = bench_optimize_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
         print(avg_time, results[prompt_len][0])
         print(results[prompt_len], np.median(results[prompt_len][1:]))
     
     # pk.dump(results, open("benchmark/full_bench.pk", "wb"))
-=======
-        # _, avg_time = bench_token_speed(prompt_len, decode_len, model, tokenizer, single_prompt)
-        print(avg_time)
-        replace_llama_attn_with_flash_attn()
-    
-    pk.dump(results, open("benchmark/bench.pk", "wb"))
->>>>>>> 1b6618e15a8725a1caad613a52cdc06c701525d1:chunk/benchmark/long_prompt.py
     
     # # results = pk.load(open("benchmark/bench.pk", "rb"))
     # # print(results)
