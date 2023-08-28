@@ -284,7 +284,8 @@ def make_supervised_data_module(
 def train():
     global local_rank
     # teacher_model_path = "/data/longchat-7b-16k/"
-    teacher_model_path = "/rscratch/zhendong/lily/llama-7b/"
+    # teacher_model_path = "/rscratch/zhendong/lily/llama-7b/"
+    teacher_model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
@@ -305,11 +306,14 @@ def train():
 
     # Load model and tokenizer
     # student model
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_args.model_name_or_path,
-        config=config,
-        cache_dir=training_args.cache_dir,
-    )
+    # model = transformers.AutoModelForCausalLM.from_pretrained(
+    #     model_args.model_name_or_path,
+    #     config=config,
+    #     cache_dir=training_args.cache_dir,
+    # )
+    # train from scratch
+    model = transformers.LlamaForCausalLM(config)
+    
     # teacher model
     teacher_config = transformers.AutoConfig.from_pretrained(
         teacher_model_path,
