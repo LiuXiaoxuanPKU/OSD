@@ -1,4 +1,4 @@
 ## Run experimets
 ```
-python experiment.py --model MODEL_PATH
+bash bash_scripts/run_cip.sh
 ```
