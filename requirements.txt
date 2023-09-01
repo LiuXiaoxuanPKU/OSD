@@ -3,3 +3,4 @@ fschat==0.2.23
 packaging
 ninja
 flash-attn
+datasets
