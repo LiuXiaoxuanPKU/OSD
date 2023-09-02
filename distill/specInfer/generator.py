@@ -56,7 +56,7 @@ class Generator:
             sampled_ratios = torch.min(sampled_ratios,
                                     torch.ones_like(sampled_ratios))
             rs = torch.rand_like(sampled_ratios)
-            print(f"Sampled ratios: {sampled_ratios}, rs:{rs}")
+            # print(f"Sampled ratios: {sampled_ratios}, rs:{rs}")
             
             if rs < sampled_ratios:
                 accept_ids.append(proposed_output.output_ids[:, t])
