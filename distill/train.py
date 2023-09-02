@@ -37,7 +37,10 @@ IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
+    student_model_path: Optional[str] = field(
+        default="facebook/opt-125m",  metadata={"help": "Path to student model"})
+    teacher_model_path: str = field(
+        default=None, metadata={"help": "Path to teacher model"})
 
 
 @dataclass
@@ -75,7 +78,8 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
     """Collects the state dict and dump to disk."""
     state_dict = trainer.model.state_dict()
     if trainer.args.should_save:
-        cpu_state_dict = {key: value.cpu() for key, value in state_dict.items()}
+        cpu_state_dict = {key: value.cpu()
+                          for key, value in state_dict.items()}
         del state_dict
         trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
 
@@ -88,10 +92,10 @@ def preprocess(
 ) -> Dict:
     if "llama" in model.lower():
         # does not support multi-round conversation for llama
-        assert len(sources) == 1
         # print(sources)
-        conversations = [sources[0][0]["content"]]
         if do_eval:
+            assert len(sources) == 1
+            conversations = [sources[0][0]["content"]]
             input_ids = tokenizer(
                 conversations,
                 return_tensors="pt",
@@ -99,6 +103,11 @@ def preprocess(
                 truncation=True,
             ).input_ids
         else:
+            # Apply prompt templates
+            conversations = []
+            for i, source in enumerate(sources):
+                conversations.append(
+                    source[0]["content"] + source[1]["content"])
             input_ids = tokenizer(
                 conversations,
                 return_tensors="pt",
@@ -106,7 +115,7 @@ def preprocess(
                 max_length=tokenizer.model_max_length,
                 truncation=True,
             ).input_ids
-        targets = input_ids.clone()    
+        targets = input_ids.clone()
         return dict(
             input_ids=input_ids,
             labels=targets,
@@ -115,7 +124,7 @@ def preprocess(
     elif "vicuna" in model.lower():
         conv = get_conversation_template(model)
         roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
-        
+
         if do_eval:
             assert len(sources) == 1
             sources[0].append({'role': 'assistant', 'content': ''})
@@ -133,7 +142,7 @@ def preprocess(
                 assert role == conv.roles[j % 2], f"{i}"
                 conv.append_message(role, sentence["content"])
             conversations.append(conv.get_prompt())
-            
+
         # Tokenize conversations
         input_ids = tokenizer(
             conversations,
@@ -143,7 +152,7 @@ def preprocess(
             truncation=True,
         ).input_ids
         targets = input_ids.clone()
-        
+
         if do_eval:
             input_ids = tokenizer(
                 conversations,
@@ -165,7 +174,7 @@ def preprocess(
                 truncation=True,
             ).input_ids
         targets = input_ids.clone()
-        
+
         assert conv.sep_style == SeparatorStyle.ADD_COLON_TWO
 
         # Mask targets. Only compute loss on the assistant outputs.
@@ -189,14 +198,15 @@ def preprocess(
                 instruction_len = len(tokenizer(parts[0]).input_ids) - 2
 
                 # Ignore the user instructions
-                target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
+                target[cur_len: cur_len + instruction_len] = IGNORE_TOKEN_ID
                 cur_len += turn_len
 
             target[cur_len:] = IGNORE_TOKEN_ID
 
             if False:  # Inspect and check the correctness of masking
                 z = target.clone()
-                z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
+                z = torch.where(z == IGNORE_TOKEN_ID,
+                                tokenizer.unk_token_id, z)
                 rank0_print(tokenizer.decode(z))
 
             if cur_len < tokenizer.model_max_length:
@@ -213,15 +223,17 @@ def preprocess(
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
         )
     else:
-        raise NotImplementedError(f"Does not support prompt template for {model}")
+        raise NotImplementedError(
+            f"Does not support prompt template for {model}")
+
 
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
-    def __init__(self, raw_data, 
+    def __init__(self, raw_data,
                  tokenizer: transformers.PreTrainedTokenizer,
                  model: str,
-                 do_eval : bool = False):
+                 do_eval: bool = False):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
 
@@ -239,8 +251,8 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        ret = preprocess([self.raw_data[i]["conversation"]], 
-                         self.tokenizer, 
+        ret = preprocess([self.raw_data[i]["conversation"]],
+                         self.tokenizer,
                          self.model,
                          self.do_eval)
         ret = dict(
@@ -254,24 +266,23 @@ class LazySupervisedDataset(Dataset):
 
 
 def make_supervised_data_module(
-    tokenizer: transformers.PreTrainedTokenizer, 
+    tokenizer: transformers.PreTrainedTokenizer,
     data_args,
     model: str
 ) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    dataset_cls = (
-        LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
-    )
+    assert data_args.lazy_preprocess, "only support lazy process"
+    dataset_cls = LazySupervisedDataset
     rank0_print("Loading data...")
 
     train_json = json.load(open(data_args.data_path, "r"))
-    train_dataset = dataset_cls(train_json, 
+    train_dataset = dataset_cls(train_json,
                                 tokenizer=tokenizer,
                                 model=model)
 
     if data_args.eval_data_path:
         eval_json = json.load(open(data_args.eval_data_path, "r"))
-        eval_dataset = dataset_cls(eval_json, 
+        eval_dataset = dataset_cls(eval_json,
                                    tokenizer=tokenizer,
                                    model=model,
                                    do_eval=True)
@@ -283,10 +294,6 @@ def make_supervised_data_module(
 
 def train():
     global local_rank
-    # teacher_model_path = "/data/longchat-7b-16k/"
-    # teacher_model_path = "/rscratch/zhendong/lily/llama-7b/"
-    teacher_model_path = "/rscratch/zhendong/lily/vicuna-7b-v1.3/"
-
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
     )
@@ -295,40 +302,39 @@ def train():
 
     # Set RoPE scaling factor
     config = transformers.AutoConfig.from_pretrained(
-        model_args.model_name_or_path,
+        model_args.student_model_path,
         cache_dir=training_args.cache_dir,
     )
     orig_ctx_len = getattr(config, "max_position_embeddings", None)
     if orig_ctx_len and training_args.model_max_length > orig_ctx_len:
-        scaling_factor = float(math.ceil(training_args.model_max_length / orig_ctx_len))
+        scaling_factor = float(
+            math.ceil(training_args.model_max_length / orig_ctx_len))
         config.rope_scaling = {"type": "linear", "factor": scaling_factor}
     config.use_cache = False
 
     # Load model and tokenizer
     # student model
-    # model = transformers.AutoModelForCausalLM.from_pretrained(
-    #     model_args.model_name_or_path,
-    #     config=config,
-    #     cache_dir=training_args.cache_dir,
-    # )
-    # train from scratch
-    model = transformers.LlamaForCausalLM(config)
-    
-    # teacher model
-    teacher_config = transformers.AutoConfig.from_pretrained(
-        teacher_model_path,
+    model = transformers.AutoModelForCausalLM.from_pretrained(
+        model_args.student_model_path,
+        config=config,
         cache_dir=training_args.cache_dir,
     )
-    # teacher_config.rope_scaling = {"type": "linear", "factor": 8}
-    # teacher_config.use_cache = False
+    # # train from scratch
+    # model = transformers.LlamaForCausalLM(config)
+
+    # teacher model
+    teacher_config = transformers.AutoConfig.from_pretrained(
+        model_args.teacher_model_path,
+        cache_dir=training_args.cache_dir,
+    )
     teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
-       teacher_model_path,
-       config=teacher_config
+        model_args.teacher_model_path,
+        config=teacher_config
     )
     teacher_model.cuda()
-    
+
     tokenizer = transformers.AutoTokenizer.from_pretrained(
-        teacher_model_path,
+        model_args.teacher_model_path,
         cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
         padding_side="right",
@@ -336,30 +342,25 @@ def train():
     )
     tokenizer.pad_token = tokenizer.unk_token
 
-    print(data_args)
     # Load data
-    data_module = make_supervised_data_module(tokenizer=tokenizer, 
+    data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args,
-                                              model=teacher_model_path)
+                                              model=model_args.teacher_model_path)
 
-    # Start trainner
-    # trainer = Trainer(
-    #     model=model, tokenizer=tokenizer, args=training_args, **data_module
-    # )
-    
     trainer = DistillTrainer(
-        model=model, tokenizer=tokenizer, teacher_model = teacher_model,
+        model=model, tokenizer=tokenizer, teacher_model=teacher_model,
         args=training_args, **data_module
     )
     trainer.add_callback(DistillTrainerCallback)
-    
+
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)
     else:
         trainer.train()
     model.config.use_cache = True
     trainer.save_state()
-    safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+    safe_save_model_for_hf_trainer(
+        trainer=trainer, output_dir=training_args.output_dir)
 
 
 if __name__ == "__main__":
