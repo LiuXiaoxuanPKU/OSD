@@ -5,12 +5,18 @@ import wandb
 from specInfer.generator import Generator
 
 class DistillTrainer(Trainer):
-    def __init__(self, teacher_model, *args, **kwargs):
+    def __init__(self, 
+                 teacher_model,
+                 propose_num,
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.teacher_model = teacher_model
         self.loss_model = "soft_only"
         self.eval_cnt = 0
-        self.generator = Generator(self.model, self.teacher_model, self.tokenizer)
+        self.generator = Generator(self.model,
+                                   self.teacher_model, 
+                                   self.tokenizer,
+                                   propose_num)
       
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
@@ -66,7 +72,8 @@ class DistillTrainerCallback(TrainerCallback):
         print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
         with open("out", "a") as f:
             f.write(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
-        wandb.log({"eval_correctness": self.correct_cnt * 1.0/self.propose_cnt})
+        wandb.log({"generated_token": self.correct_cnt * 1.0/self.propose_cnt})
+        
         self.eval_step += 1
         self.correct_cnt = 0
         self.propose_cnt = 0

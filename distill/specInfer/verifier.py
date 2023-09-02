@@ -5,12 +5,8 @@ from specInfer.common import (InputAndCache,
                               OutputAndCache, 
                               crop_past_key_values, 
                               sychronize_time,
-                              argmax_sample_fn)
+                              sample_fn)
 from transformers import LogitsProcessorList
-
-import logging
-logger = logging.getLogger('verifier_logger') 
-logger.setLevel(logging.INFO) 
 
 
 
@@ -38,7 +34,7 @@ class Verifier:
         next_token_scores = self.processor(input.input_ids, outputs.logits)
         generated_len = propose_len + 1
         logits = next_token_scores[:, -generated_len:, :]
-        next_tokens = argmax_sample_fn(logits)
+        next_tokens = sample_fn(logits)
         
         if self.benchmark_time:
             self.verify_time += sychronize_time() - start
@@ -47,7 +43,6 @@ class Verifier:
     def prepare_input(self, proposer_output: OutputAndCache, 
                             verifier_input: InputAndCache) -> InputAndCache:
         if self.benchmark_time:
-            logger.debug(proposer_output.output_ids.shape)
             start = sychronize_time()
         
         if verifier_input.past_key_values is None:
@@ -60,7 +55,7 @@ class Verifier:
                                         torch.ones_like(proposer_output.output_ids, 
                                                         dtype=torch.long, device="cuda")], dim=-1)
         else:
-            input_ids = torch.cat([verifier_input.input_ids, proposer_output.output_ids], dim=-1)
+            input_ids = torch.cat([verifier_input.input_ids.unsqueeze(0), proposer_output.output_ids], dim=-1)
             past_key_values = verifier_input.past_key_values
             attention_mask = torch.cat([verifier_input.attention_mask, 
                                         torch.ones_like(proposer_output.output_ids, 
@@ -77,7 +72,7 @@ class Verifier:
             start = sychronize_time()
         
         n_matches = accept_token_ids.shape[1]
-        verifier_input_ids = verifier_output.output_ids[:, n_matches-1:n_matches]
+        verifier_input_ids = verifier_output.output_ids[n_matches-1:n_matches]
         verifier_generated_len = verifier_output.past_key_values[0][0].shape[2] - (verifier_output.generated_len - 1) + n_matches
         verifier_key_values = crop_past_key_values(verifier_output.past_key_values, verifier_generated_len - 1)
         

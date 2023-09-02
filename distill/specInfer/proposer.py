@@ -4,12 +4,7 @@ from specInfer.common import (InputAndCache,
                               OutputAndCache, 
                               crop_past_key_values, 
                               sychronize_time,
-                              argmax_sample_fn)
-
-import logging
-logger = logging.getLogger('proposer_logger') 
-logger.setLevel(logging.INFO)
-
+                              sample_fn)
 
 class Proposer:
     def __init__(self) -> None:
@@ -113,7 +108,7 @@ class SmallModelKVCacheProposer(Proposer):
                                  use_cache=True)
             past_key_values = outputs.past_key_values
             next_token_logits = outputs.logits[:, -1, :]
-            next_token_id = argmax_sample_fn(next_token_logits).item()
+            next_token_id = sample_fn(next_token_logits).item()
             propose_tokens.append(next_token_id)
             if next_token_id == self.tokenizer.eos_token_id:
                 generated_len = i + 1
@@ -132,7 +127,6 @@ class SmallModelKVCacheProposer(Proposer):
         total_generated_len = proposer_output.past_key_values[0][0].shape[2] + 1
         proposer_key_values = crop_past_key_values(proposer_output.past_key_values, 
                                     max_len=total_generated_len - proposer_output.generated_len)
-        logger.debug(f"adjust input: {total_generated_len}, {total_generated_len - proposer_output.generated_len}")
         proposer_attn_masks = torch.cat([proposer_input.attention_mask, 
                                          torch.ones_like(proposer_input_ids, dtype=torch.long)], dim=-1)
         return InputAndCache(proposer_input_ids, proposer_attn_masks, proposer_key_values)
