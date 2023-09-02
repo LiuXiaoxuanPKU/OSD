@@ -18,6 +18,20 @@ class OutputAndCache:
     
 
 ########################### Utility ########################
+TEMPERATURE = 0.5
+def get_temperature_distribution(logits, temperature=TEMPERATURE):
+    return torch.softmax(logits / temperature, dim=-1)
+
+def target_sample_from_distribution(target_distribution, draft_distribution):
+    distribution = (target_distribution - draft_distribution)
+    distribution = torch.max(distribution,
+                             torch.zeros_like(distribution))
+    distribution = distribution / distribution.sum(dim=-1, keepdim=True)
+    return torch.multinomial(distribution, num_samples=1).squeeze(-1)
+
+def argmax_sample_fn(logits):
+    return torch.argmax(logits, dim=-1)
+
 def slice_past_key_values(past_key_values, start_idx, slice_len):
     new_past = []
     for idx in range(len(past_key_values)):
@@ -31,7 +45,6 @@ def slice_past_key_values(past_key_values, start_idx, slice_len):
 
 def crop_past_key_values(past_key_values, max_len):
     return slice_past_key_values(past_key_values, 0, max_len)
-
 def sychronize_time():
     torch.cuda.synchronize()
     return time.time()

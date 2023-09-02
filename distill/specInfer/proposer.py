@@ -1,6 +1,10 @@
 import torch
 from typing import List
-from specInfer.common import InputAndCache, OutputAndCache, crop_past_key_values, sychronize_time
+from specInfer.common import (InputAndCache, 
+                              OutputAndCache, 
+                              crop_past_key_values, 
+                              sychronize_time,
+                              argmax_sample_fn)
 
 import logging
 logger = logging.getLogger('proposer_logger') 
@@ -70,7 +74,6 @@ class SmallModelProposer(Proposer):
         
         propose_tokens = []
         input_ids = input.input_ids
-        past_key_values = None
         generated_len = n
         for i in range(n):
             outputs = self.model(input_ids)
@@ -80,9 +83,7 @@ class SmallModelProposer(Proposer):
                 generated_len = i + 1
                 break
             input_ids = torch.cat([input_ids, next_tokens.reshape(1, 1)], dim=-1)
-        propose_tokens = torch.tensor(propose_tokens, device=input_ids.device).reshape(1, -1)     
-        print(propose_tokens)
-        exit(0)
+        propose_tokens = torch.tensor(propose_tokens, device=input_ids.device).reshape(1, -1)
         return OutputAndCache(generated_len, propose_tokens, None, None)
     
     def adjust_input_impl(self, accept_token_ids: torch.Tensor, 
@@ -97,9 +98,6 @@ class SmallModelKVCacheProposer(Proposer):
         self.model = model
         self.tokenizer = tokenizer
         
-    def sample_fn(self, logits):
-        return torch.argmax(logits, dim=-1).item()
-    
     def propose_impl(self, input: InputAndCache, n: int) -> OutputAndCache:
         if input.input_ids.shape[0] > 1:
             raise NotImplementedError("Not implement for batch_size > 1 in evaluation")
@@ -115,14 +113,16 @@ class SmallModelKVCacheProposer(Proposer):
                                  use_cache=True)
             past_key_values = outputs.past_key_values
             next_token_logits = outputs.logits[:, -1, :]
-            next_token_id = self.sample_fn(next_token_logits)
+            next_token_id = argmax_sample_fn(next_token_logits).item()
             propose_tokens.append(next_token_id)
             if next_token_id == self.tokenizer.eos_token_id:
                 generated_len = i + 1
+                print(f"[Info] Stop at {generated_len} because of eos")
                 break
             input_ids = torch.tensor(next_token_id, device='cuda', dtype=torch.long).reshape(1, -1)
             propose_logits.append(outputs.logits[:, -1, :])
         propose_tokens = torch.tensor(propose_tokens, device=input_ids.device).reshape(1, -1)
+        propose_logits = torch.cat(propose_logits, dim=0)
         return OutputAndCache(generated_len, propose_tokens, propose_logits, past_key_values)
     
     def adjust_input_impl(self, accept_token_ids: torch.Tensor, 
