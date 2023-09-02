@@ -13,6 +13,7 @@ class InputAndCache:
 class OutputAndCache:
     generated_len: int
     output_ids: torch.Tensor
+    output_logits: torch.Tensor
     past_key_values: torch.Tensor
     
 

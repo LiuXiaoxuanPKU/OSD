@@ -73,9 +73,7 @@ class SmallModelProposer(Proposer):
         past_key_values = None
         generated_len = n
         for i in range(n):
-            outputs = self.model(input_ids,
-                                 past_key_values=past_key_values,
-                                 use_cache=True)
+            outputs = self.model(input_ids)
             next_tokens = torch.argmax(outputs.logits[:, -1, :], dim=-1)
             propose_tokens.append(next_tokens[0].item())
             if next_tokens[0] == self.tokenizer.eos_token_id:
@@ -83,7 +81,9 @@ class SmallModelProposer(Proposer):
                 break
             input_ids = torch.cat([input_ids, next_tokens.reshape(1, 1)], dim=-1)
         propose_tokens = torch.tensor(propose_tokens, device=input_ids.device).reshape(1, -1)     
-        return OutputAndCache(generated_len, propose_tokens, None)
+        print(propose_tokens)
+        exit(0)
+        return OutputAndCache(generated_len, propose_tokens, None, None)
     
     def adjust_input_impl(self, accept_token_ids: torch.Tensor, 
                      proposer_input: InputAndCache, 
@@ -96,12 +96,16 @@ class SmallModelKVCacheProposer(Proposer):
         super().__init__()
         self.model = model
         self.tokenizer = tokenizer
+        
+    def sample_fn(self, logits):
+        return torch.argmax(logits, dim=-1).item()
     
     def propose_impl(self, input: InputAndCache, n: int) -> OutputAndCache:
         if input.input_ids.shape[0] > 1:
             raise NotImplementedError("Not implement for batch_size > 1 in evaluation")
         
         propose_tokens = []
+        propose_logits = []
         input_ids = input.input_ids
         past_key_values = input.past_key_values
         generated_len = n
@@ -110,14 +114,16 @@ class SmallModelKVCacheProposer(Proposer):
                                  past_key_values=past_key_values,
                                  use_cache=True)
             past_key_values = outputs.past_key_values
-            next_tokens = torch.argmax(outputs.logits[:, -1, :], dim=-1)
-            propose_tokens.append(next_tokens[0].item())
-            if next_tokens[0] == self.tokenizer.eos_token_id:
+            next_token_logits = outputs.logits[:, -1, :]
+            next_token_id = self.sample_fn(next_token_logits)
+            propose_tokens.append(next_token_id)
+            if next_token_id == self.tokenizer.eos_token_id:
                 generated_len = i + 1
                 break
-            input_ids = torch.cat([input_ids, next_tokens.reshape(1, 1)], dim=-1)
-        propose_tokens = torch.tensor(propose_tokens, device=input_ids.device).reshape(1, -1)     
-        return OutputAndCache(generated_len, propose_tokens, past_key_values)
+            input_ids = torch.tensor(next_token_id, device='cuda', dtype=torch.long).reshape(1, -1)
+            propose_logits.append(outputs.logits[:, -1, :])
+        propose_tokens = torch.tensor(propose_tokens, device=input_ids.device).reshape(1, -1)
+        return OutputAndCache(generated_len, propose_tokens, propose_logits, past_key_values)
     
     def adjust_input_impl(self, accept_token_ids: torch.Tensor, 
                      proposer_input: InputAndCache, 

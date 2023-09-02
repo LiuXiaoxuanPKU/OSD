@@ -33,7 +33,7 @@ class Verifier:
         next_tokens = torch.argmax(next_token_scores[:, -generated_len:, :], dim=-1)
         
         self.verify_time += sychronize_time() - start
-        return OutputAndCache(generated_len, next_tokens, outputs.past_key_values)
+        return OutputAndCache(generated_len, next_tokens, None, outputs.past_key_values)
     
     def prepare_input(self, proposer_output: OutputAndCache, 
                             verifier_input: InputAndCache) -> InputAndCache:
