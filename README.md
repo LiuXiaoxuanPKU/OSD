@@ -1,18 +1,25 @@
 ## Distill
+0. install dependency
+```
+pip install -r requirements.txt
+```
 1. prepare data
 ```
 cd data
 python clean_cip.py
 ```
-2. replace the teacher model path [here](https://github.com/LiuXiaoxuanPKU/specNBCE/blob/95cfd61dbbb7570d8733b27af1eb322a1c6d9f6b/distill/train.py#L269)
-3. start train
+2. start training
 ```
-cd ..
+cd .. # go back to project root
 bash bash_scripts/run_cip.sh
 ```
 
-
-## Compare Models
+`bash_scripts/run_cip.sh` contains all the training/data/log parameters, for example
 ```
-python distill/compare_model.py
+--student_model_path: path to the student (small) model
+--teacher_model_path: path to the teacher (big) model
+--output_dir: path to save checkpoints
+--data_path: training data path
+--eval_data_path: evaluation data path
+--run_name: name shown on wandb
 ```

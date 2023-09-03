@@ -55,3 +55,7 @@ with open('piqa_train.json', 'w') as f:
         
 with open('piqa_eval.json', 'w') as f:
     json.dump(eval_cases, f)
+
+import os
+os.remove(f"piqa_train_raw.json")
+os.remove(f"piqa_eval_raw.json")

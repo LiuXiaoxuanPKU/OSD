@@ -27,28 +27,30 @@ def main(student_model_path, teacher_model_path,
     i = 0
     correctness = 0
     stats = torch.zeros(32000, dtype=torch.long, device='cuda')
+    alpha, sample_steps = 0, 0
     for d in eval_dataset:
         max_tokens = 100
         input_ids = d["input_ids"].reshape(1, -1).cuda()
-        output, correct_tokens, propose_step = generator.generate(input_ids, max_tokens)
-        correct_tokens = correct_tokens.squeeze(0)
+        output = generator.generate(input_ids, max_tokens)
+        correct_tokens = output.correct_tokens.squeeze(0)
         stats[correct_tokens] = stats[correct_tokens] + 1
         if i % 10 == 0:
             print(f"{i}/{len(eval_dataset)}")
-        print("===================================")
-        print(tokenizer.decode(d["input_ids"]))
-        print(output)
-        print(correct_tokens.shape)
-        print(propose_step, correct_tokens.shape[-1]/propose_step)
-        print(tokenizer.batch_decode(correct_tokens))
-        correctness += correct_tokens.shape[-1]/propose_step
-        print("===================================")
+        # print("===================================")
+        # print(tokenizer.decode(d["input_ids"]))
+        # print(output)
+        # print(correct_tokens.shape)
+        # print(propose_step, correct_tokens.shape[-1]/propose_step)
+        # print("===================================")
+        correctness += output.correct_tokens.shape[-1]/output.propose_steps
+        alpha += output.alpha_sum
+        sample_steps += output.sample_steps
         i += 1
         if i == 10:
-            exit(0)
-    print(i, correctness / i)
+            break
+    print(i, correctness / i, alpha / sample_steps)
     
-    with open('output/vicuna-7k_correct.pkl', 'wb') as f:
+    with open('output/vicuna_correct.pkl', 'wb') as f:
         pickle.dump(stats, f)
 
 
@@ -89,5 +91,5 @@ if __name__ == "__main__":
                         default="/home/lily/specNBCE/data/spider_eval.json")
     
     args = parser.parse_args()
-    # main(args.student, args.teacher, args.data)
-    model_generate(args.student, args.data)
+    main(args.student, args.teacher, args.data)
+    # model_generate(args.student, args.data)

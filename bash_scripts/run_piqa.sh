@@ -1,5 +1,6 @@
 WANDB_PROJECT=specInfer python distill/train.py \
-    --model_name_or_path JackFram/llama-160m  \
+    --student_model_path JackFram/llama-160m  \
+    --teacher_model_path /rscratch/zhendong/lily/llama-7b/ \
     --data_path data/piqa_train.json \
     --eval_data_path data/piqa_eval.json \
     --bf16 True \
@@ -22,4 +23,4 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name vicuna_piqa
+    --run_name piqa

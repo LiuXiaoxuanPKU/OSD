@@ -5,12 +5,18 @@ import wandb
 from specInfer.generator import Generator
 
 class DistillTrainer(Trainer):
-    def __init__(self, teacher_model, *args, **kwargs):
+    def __init__(self, 
+                 teacher_model,
+                 propose_num,
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.teacher_model = teacher_model
         self.loss_model = "soft_only"
         self.eval_cnt = 0
-        self.generator = Generator(self.model, self.teacher_model, self.tokenizer)
+        self.generator = Generator(self.model,
+                                   self.teacher_model, 
+                                   self.tokenizer,
+                                   propose_num)
       
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
@@ -44,12 +50,14 @@ class DistillTrainer(Trainer):
         return loss.detach()
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output, matches, propose_cnt = self.generator.generate(inputs["input_ids"], 200)
+        output = self.generator.generate(inputs["input_ids"], 200)
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, DistillTrainerCallback):
-                callback.correct_cnt += matches.shape[-1]
-                callback.propose_cnt += propose_cnt
+                callback.correct_cnt += output.correct_tokens.shape[-1]
+                callback.propose_cnt += output.propose_steps
+                callback.alpha += output.alpha_sum
+                callback.sample_steps += output.sample_steps
                 find = True
         assert find
 
@@ -62,11 +70,20 @@ class DistillTrainerCallback(TrainerCallback):
         self.correct_cnt = 0
         self.propose_cnt = 0
         
+        self.alpha = 0
+        self.sample_steps = 0
+        
     def on_evaluate(self, args, state, control, **kwargs):
         print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
         with open("out", "a") as f:
             f.write(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
-        wandb.log({"eval_correctness": self.correct_cnt * 1.0/self.propose_cnt})
+        wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+        wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
+        
         self.eval_step += 1
         self.correct_cnt = 0
         self.propose_cnt = 0
+        
+        self.alpha = 0
+        self.sample_steps = 0
+        
