@@ -28,15 +28,17 @@ class Generator:
                  max_propose_num) -> None:
         self.model = large_model
         self.tokenizer = tokenizer
-        self.proposer = SmallModelKVCacheProposer(small_model, tokenizer)
+        # metrics
+        self.benchmark_time = False
+        self.generation_time = []
+        
+        self.proposer = SmallModelKVCacheProposer(small_model, tokenizer, self.benchmark_time)
         # self.proposer = SmallModelProposer(small_model, tokenizer)
-        self.verifier = Verifier(large_model, tokenizer)
+        self.verifier = Verifier(large_model, tokenizer, self.benchmark_time)
 
         # parameters
         self.max_propose_num = max_propose_num
 
-        # metrics
-        self.generation_time = []
 
     def compare_tokens(self, proposed_output: OutputAndCache, verified_output: OutputAndCache) -> torch.Tensor:
         assert proposed_output.output_ids.shape == verified_output.output_ids[:, :-1].shape, \
@@ -149,16 +151,21 @@ class Generator:
             verifier_input = self.verifier.adjust_input(
                 accept_token_ids, verifier_input, verifier_output)
 
-            self.generation_time.append(sychronize_time() - start)
+            if self.benchmark_time:
+                self.generation_time.append(sychronize_time() - start)
 
             if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
                 break
 
+        self.proposer.print_time()
+        self.verifier.print_time()
+        self.print_time()
         return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens), 
                 correct_tokens, 
                 propose_steps,
                 sample_steps, alpha)
 
-    # def __del__(self):
-        # print(f"[Generator time: {self.generation_time}")
-        # print(f"[Max allocated memory]: {torch.cuda.max_memory_allocated() / 1024 / 1024} MB")
+    def print_time(self):
+        if self.benchmark_time:
+            print(f"[Generator time]: {self.generation_time}")
+            print(f"[Max allocated memory]: {torch.cuda.max_memory_allocated() / 1024 / 1024} MB")
