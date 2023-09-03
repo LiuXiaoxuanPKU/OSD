@@ -14,8 +14,12 @@ cd .. # go back to project root
 bash bash_scripts/run_cip.sh
 ```
 
-## Compare Models
-Under the project root directory, run
+`bash_scripts/run_cip.sh` contains all the training/data/log parameters, for example
 ```
-python distill/compare_model.py
+--student_model_path: path to the student (small) model
+--teacher_model_path: path to the teacher (big) model
+--output_dir: path to save checkpoints
+--data_path: training data path
+--eval_data_path: evaluation data path
+--run_name: name shown on wandb
 ```
