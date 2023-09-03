@@ -40,12 +40,14 @@ def main(student_model_path, teacher_model_path,
         # print(output)
         # print(correct_tokens.shape)
         # print(propose_step, correct_tokens.shape[-1]/propose_step)
-        # correctness += correct_tokens.shape[-1]/propose_step
+        correctness += correct_tokens.shape[-1]/propose_step
         # print("===================================")
         i += 1
+        # if i == 10:
+        #     exit(0)
     print(i, correctness / i)
     
-    with open('output/llama_correct.pkl', 'wb') as f:
+    with open('output/vicuna_correct.pkl', 'wb') as f:
         pickle.dump(stats, f)
 
 
@@ -54,12 +56,12 @@ if __name__ == "__main__":
     parser.add_argument("--student", type=str, 
                         help="student model path", 
                         default="/rscratch/zhendong/lily/llama-160m/")
-    # parser.add_argument("--teacher", type=str, 
-    #                     help="teacher model path", 
-    #                     default="/rscratch/zhendong/lily/vicuna-7b-v1.3/")
     parser.add_argument("--teacher", type=str, 
                         help="teacher model path", 
-                        default="/rscratch/zhendong/lily/llama-7b/")
+                        default="/rscratch/zhendong/lily/vicuna-7b-v1.3/")
+    # parser.add_argument("--teacher", type=str, 
+    #                     help="teacher model path", 
+    #                     default="/rscratch/zhendong/lily/llama-7b/")
     
     parser.add_argument("--data", type=str, 
                         help="data path", 

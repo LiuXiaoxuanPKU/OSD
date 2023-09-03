@@ -64,6 +64,12 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."
         },
     )
+    max_propose_num: int = field(
+        default=5,
+        metadata={
+            "help": "gamma, number of tokens the student model proposes for each step"
+        }
+    )
 
 
 local_rank = None
@@ -348,7 +354,8 @@ def train():
                                               model=model_args.teacher_model_path)
 
     trainer = DistillTrainer(
-        model=model, tokenizer=tokenizer, teacher_model=teacher_model,
+        model=model, tokenizer=tokenizer, 
+        teacher_model=teacher_model, propose_num=training_args.max_propose_num,
         args=training_args, **data_module
     )
     trainer.add_callback(DistillTrainerCallback)

@@ -57,7 +57,7 @@ class DistillTrainer(Trainer):
                 callback.correct_cnt += output.correct_tokens.shape[-1]
                 callback.propose_cnt += output.propose_steps
                 callback.alpha += output.alpha_sum
-                callback.sample_step += output.sample_steps
+                callback.sample_steps += output.sample_steps
                 find = True
         assert find
 
