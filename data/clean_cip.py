@@ -1,6 +1,7 @@
 from datasets import load_dataset
 import json
 import random
+import os
 
 dataset = load_dataset("alespalla/chatbot_instruction_prompts")
 
@@ -55,3 +56,6 @@ with open('cip_train.json', 'w') as f:
         
 with open('cip_eval.json', 'w') as f:
     json.dump(eval_cases, f)
+
+os.remove(f"cip_train_raw.json")
+os.remove(f"cip_eval_raw.json")

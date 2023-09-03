@@ -1,13 +1,14 @@
 WANDB_PROJECT=specInfer python distill/train.py \
-    --model_name_or_path JackFram/llama-160m  \
+    --student_model_path JackFram/llama-160m  \
+    --teacher_model_path /rscratch/zhendong/lily/llama-7b/ \
     --data_path data/cip_train.json \
     --eval_data_path data/cip_eval.json \
     --bf16 True \
-    --output_dir /data/vicuna_cip \
+    --output_dir /rscratch/zhendong/lily/llama_cip \
     --num_train_epochs 3 \
-    --per_device_train_batch_size 4 \
+    --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 8 \
     --evaluation_strategy "steps" \
     --eval_steps 100 \
     --save_strategy "steps" \
@@ -22,4 +23,4 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name cip
+    --run_name test
