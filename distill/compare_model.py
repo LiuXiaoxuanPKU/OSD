@@ -11,13 +11,15 @@ def load_model(model_path):
     model = AutoModelForCausalLM.from_pretrained(model_path, config=config).cuda()
     return model
 
-def main(student_model_path, teacher_model_path,
+def main(student_model_path, 
+         teacher_model_path, 
+         max_propose_num,
          data_path):
     tokenizer = AutoTokenizer.from_pretrained(teacher_model_path)
     tokenizer.pad_token = tokenizer.unk_token
     teacher_model = load_model(teacher_model_path)
     student_model = load_model(student_model_path)
-    generator = Generator(student_model, teacher_model, tokenizer)
+    generator = Generator(student_model, teacher_model, tokenizer, max_propose_num)
    
     eval_json = json.load(open(data_path, "r"))
     eval_dataset = LazySupervisedDataset(eval_json, tokenizer=tokenizer, 
@@ -38,7 +40,7 @@ def main(student_model_path, teacher_model_path,
             print(f"{i}/{len(eval_dataset)}")
         # print("===================================")
         # print(tokenizer.decode(d["input_ids"]))
-        # print(output)
+        # print(output.output)
         # print(correct_tokens.shape)
         # print(propose_step, correct_tokens.shape[-1]/propose_step)
         # print("===================================")
@@ -46,9 +48,9 @@ def main(student_model_path, teacher_model_path,
         alpha += output.alpha_sum
         sample_steps += output.sample_steps
         i += 1
-        if i == 10:
-            break
-    print(i, correctness / i, alpha / sample_steps)
+        # if i == 10:
+        #     break
+    print(i, correctness / i, alpha.item() / sample_steps)
     
     with open('output/vicuna_correct.pkl', 'wb') as f:
         pickle.dump(stats, f)
@@ -89,7 +91,10 @@ if __name__ == "__main__":
     parser.add_argument("--data", type=str, 
                         help="data path", 
                         default="/home/lily/specNBCE/data/spider_eval.json")
+    parser.add_argument("--max_propose_num", type=int, 
+                        help="number of proposed tokens", 
+                        default=5)
     
     args = parser.parse_args()
-    main(args.student, args.teacher, args.data)
+    main(args.student, args.teacher, args.max_propose_num, args.data)
     # model_generate(args.student, args.data)
