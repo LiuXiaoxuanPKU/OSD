@@ -7,10 +7,19 @@ from specInfer.proposer import SmallModelProposer, SmallModelKVCacheProposer
 from specInfer.verifier import Verifier
 from specInfer.common import sychronize_time, InputAndCache
 from specInfer.logger import SpecLogger
+from dataclasses import dataclass
+from typing import List
 
 logger = SpecLogger("output/generator.info")
 
-
+@dataclass
+class GeneratorOutput:
+    output: List[str]
+    correct_tokens: torch.tensor
+    propose_steps: int
+    sample_steps: int
+    alpha_sum: float
+    
 class Generator:
     def __init__(self, 
                  small_model, 
@@ -39,7 +48,7 @@ class Generator:
         # after < 1: [[1, 1, 0]]
         n_matches = ((~(proposed_output.output_ids ==
                      verified_output.output_ids[:, :-1])).cumsum(dim=-1) < 1).sum()
-        return verified_output.output_ids[:, :n_matches + 1]
+        return verified_output.output_ids[:, :n_matches + 1], -1, -1
 
     def sample_tokens(self, proposed_output: OutputAndCache, verified_output: OutputAndCache) -> torch.Tensor:
         target_distribution = get_temperature_distribution(
@@ -50,6 +59,8 @@ class Generator:
         # Accept-reject token loop
         accept_ids = []
         all_accepted = True
+        sample_steps = 0
+        alpha = 0
         for t in range(proposed_output.generated_len):
             sampled_ratios = (
                 target_distribution[t, proposed_output.output_ids[0, t]]
@@ -58,8 +69,14 @@ class Generator:
             sampled_ratios = torch.min(sampled_ratios,
                                        torch.ones_like(sampled_ratios))
             rs = torch.rand_like(sampled_ratios)
-            logger.log("sample ratio", (rs, sampled_ratios))
+            # logger.log("sample ratio", (rs, sampled_ratios))
+            cur_alpha = min(target_distribution[t, proposed_output.output_ids[0, t]], 
+                            draft_distribution[t, proposed_output.output_ids[0, t]])
 
+            assert cur_alpha >= 0 and cur_alpha <= 1
+            alpha += cur_alpha
+            sample_steps += 1
+            
             if rs < sampled_ratios:
                 accept_ids.append(proposed_output.output_ids[:, t])
             else:
@@ -78,7 +95,7 @@ class Generator:
             accept_ids.append(next_token_id)
 
         accept_ids = torch.cat(accept_ids, dim=0)
-        return accept_ids.unsqueeze(0)
+        return accept_ids.unsqueeze(0), alpha, sample_steps
 
     @torch.inference_mode()
     def generate(self, input_ids, max_tokens):
@@ -91,6 +108,7 @@ class Generator:
 
         correct_tokens = None
         propose_steps = 0
+        alpha, sample_steps = 0, 0
         while True:
             start = sychronize_time()
             # propose n tokens
@@ -107,10 +125,12 @@ class Generator:
                 verifier_input, proposer_output.generated_len)
 
             # compare selected tokens
-            # accept_token_ids = self.compare_tokens(proposer_output, verifier_output)
-            accept_token_ids = self.sample_tokens(
+            # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
+            accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
                 proposer_output, verifier_output)
-            logger.log("acc_tokens", accept_token_ids)
+            alpha += cur_alpha
+            sample_steps += cur_sample_steps
+            # logger.log("acc_tokens", accept_token_ids)
             if generated_tokens is None:
                 generated_tokens = accept_token_ids
             else:
@@ -134,7 +154,10 @@ class Generator:
             if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
                 break
 
-        return self.tokenizer.batch_decode(generated_tokens), correct_tokens, propose_steps
+        return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens), 
+                correct_tokens, 
+                propose_steps,
+                sample_steps, alpha)
 
     # def __del__(self):
         # print(f"[Generator time: {self.generation_time}")

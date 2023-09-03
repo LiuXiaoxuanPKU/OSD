@@ -50,12 +50,14 @@ class DistillTrainer(Trainer):
         return loss.detach()
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output, matches, propose_cnt = self.generator.generate(inputs["input_ids"], 200)
+        output = self.generator.generate(inputs["input_ids"], 200)
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, DistillTrainerCallback):
-                callback.correct_cnt += matches.shape[-1]
-                callback.propose_cnt += propose_cnt
+                callback.correct_cnt += output.correct_tokens.shape[-1]
+                callback.propose_cnt += output.propose_steps
+                callback.alpha += output.alpha_sum
+                callback.sample_step += output.sample_steps
                 find = True
         assert find
 
@@ -68,12 +70,20 @@ class DistillTrainerCallback(TrainerCallback):
         self.correct_cnt = 0
         self.propose_cnt = 0
         
+        self.alpha = 0
+        self.sample_steps = 0
+        
     def on_evaluate(self, args, state, control, **kwargs):
         print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
         with open("out", "a") as f:
             f.write(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
-        wandb.log({"generated_token": self.correct_cnt * 1.0/self.propose_cnt})
+        wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+        wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
         
         self.eval_step += 1
         self.correct_cnt = 0
         self.propose_cnt = 0
+        
+        self.alpha = 0
+        self.sample_steps = 0
+        
