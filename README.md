@@ -23,3 +23,10 @@ bash bash_scripts/run_cip.sh
 --eval_data_path: evaluation data path
 --run_name: name shown on wandb
 ```
+
+## Small Experiment
+under root directory, run
+```
+python distill/experiment/test_llama_vicuna.py
+```
+it will a single speculative decoding example and show the speed/accuracy comparison. Please also change the small/large model path in the `test_llama_vicuna.py`.
