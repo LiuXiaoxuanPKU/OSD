@@ -1,6 +1,4 @@
-transformers==4.31.0
 fschat==0.2.23
 packaging
-ninja
-flash-attn
-datasets
+pandas==2.0.3
+datasets==2.14.4
