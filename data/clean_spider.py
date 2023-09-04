@@ -11,14 +11,14 @@ dataset["train"].to_json(f"{data_name}_train_raw.json")
 dataset["validation"].to_json(f"{data_name}_eval_raw.json")
 
 def load_transform(filename, prefix):
-    SQL_prompt = " Please answer in SQL."
+    SQL_prompt = "Could you translate the following question into SQL. "
     def transform(i, case):
         case["id"] = f"{prefix}_identity_{i}"
         if prefix == "train":
             case["conversation"] = [
                 {
                     "role" : "user",
-                    "content" : case['question'] + SQL_prompt
+                    "content" : SQL_prompt + case['question']
                 },
                 {
                     "role" : "assistant",
@@ -29,7 +29,7 @@ def load_transform(filename, prefix):
             case["conversation"] = [
                 {
                     "role" : "user",
-                    "content" : case['question'] + SQL_prompt
+                    "content" : SQL_prompt + case['question']
                 }
             ]
         else:
