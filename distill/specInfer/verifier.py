@@ -33,11 +33,11 @@ class Verifier:
         next_token_scores = self.processor(input.input_ids, outputs.logits)
         generated_len = propose_len + 1
         logits = next_token_scores[:, -generated_len:, :]
-        next_tokens = sample_fn(logits)
+        # next_tokens = sample_fn(logits)
 
         if self.benchmark_time:
             self.verify_times.append(sychronize_time() - start)
-        return OutputAndCache(generated_len, next_tokens, logits.squeeze(0), outputs.past_key_values)
+        return OutputAndCache(generated_len, None, logits.squeeze(0), outputs.past_key_values)
 
     def prepare_input(self, proposer_output: OutputAndCache,
                       verifier_input: InputAndCache) -> InputAndCache:
@@ -73,7 +73,7 @@ class Verifier:
             start = sychronize_time()
 
         n_matches = accept_token_ids.shape[1]
-        verifier_input_ids = verifier_output.output_ids[n_matches-1:n_matches]
+        verifier_input_ids = accept_token_ids[:, -1]
         verifier_generated_len = verifier_output.past_key_values[0][0].shape[2] - (
             verifier_output.generated_len - 1) + n_matches
         verifier_key_values = crop_past_key_values(

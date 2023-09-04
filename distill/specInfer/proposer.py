@@ -108,6 +108,7 @@ class SmallModelKVCacheProposer(Proposer):
             raise NotImplementedError(
                 "Not implement for batch_size > 1 in evaluation")
 
+        temperature = 0.1
         propose_tokens = []
         propose_logits = []
         input_ids = input.input_ids
@@ -119,7 +120,7 @@ class SmallModelKVCacheProposer(Proposer):
                                  use_cache=True)
             past_key_values = outputs.past_key_values
             next_token_logits = outputs.logits[:, -1, :]
-            next_token_id = sample_fn(next_token_logits).unsqueeze(0)
+            next_token_id = sample_fn(next_token_logits, temperature).unsqueeze(0)
             propose_tokens.append(next_token_id)
             propose_logits.append(outputs.logits[:, -1, :])
             if next_token_id.item() == self.tokenizer.eos_token_id:

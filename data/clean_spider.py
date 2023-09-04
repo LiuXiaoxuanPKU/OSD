@@ -11,7 +11,7 @@ dataset["train"].to_json(f"{data_name}_train_raw.json")
 dataset["validation"].to_json(f"{data_name}_eval_raw.json")
 
 def load_transform(filename, prefix):
-    SQL_prompt = "Could you translate the following question into SQL. "
+    SQL_prompt = "Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer. "
     def transform(i, case):
         case["id"] = f"{prefix}_identity_{i}"
         if prefix == "train":

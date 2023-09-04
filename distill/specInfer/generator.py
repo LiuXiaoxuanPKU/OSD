@@ -52,11 +52,14 @@ class Generator:
                      verified_output.output_ids[:, :-1])).cumsum(dim=-1) < 1).sum()
         return verified_output.output_ids[:, :n_matches + 1], -1, -1
 
-    def sample_tokens(self, proposed_output: OutputAndCache, verified_output: OutputAndCache) -> torch.Tensor:
+    def sample_tokens(self, 
+                      proposed_output: OutputAndCache, 
+                      verified_output: OutputAndCache,
+                      temperature: float) -> torch.Tensor:
         target_distribution = get_temperature_distribution(
-            verified_output.output_logits)
+            verified_output.output_logits, temperature=temperature)
         draft_distribution = get_temperature_distribution(
-            proposed_output.output_logits)
+            proposed_output.output_logits, temperature=temperature)
 
         # Accept-reject token loop
         accept_ids = []
@@ -92,7 +95,7 @@ class Generator:
         # if all tokens were accepted, sample a last one
         if all_accepted:
             next_token_id = sample_fn(
-                verified_output.output_logits[-1, :]).unsqueeze(0)
+                verified_output.output_logits[-1, :], temperature).unsqueeze(0)
             assert next_token_id.dim() == 1
             accept_ids.append(next_token_id)
 
@@ -100,7 +103,7 @@ class Generator:
         return accept_ids.unsqueeze(0), alpha, sample_steps
 
     @torch.inference_mode()
-    def generate(self, input_ids, max_tokens):
+    def generate(self, input_ids, max_tokens, temperature=1):
         generated_token_cnt = 0
         generated_tokens = None
         proposer_input = InputAndCache(
@@ -113,7 +116,7 @@ class Generator:
         alpha, sample_steps = 0, 0
         while True:
             start = sychronize_time()
-            # propose n tokens
+            # propose n tokens, proposer always propose the token with highest probability
             proposer_output = self.proposer.propose(
                 proposer_input, self.max_propose_num)
             propose_steps += 1
@@ -129,7 +132,7 @@ class Generator:
             # compare selected tokens
             # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
             accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
-                proposer_output, verifier_output)
+                proposer_output, verifier_output, temperature)
             alpha += cur_alpha
             sample_steps += cur_sample_steps
             # logger.log("acc_tokens", accept_token_ids)
