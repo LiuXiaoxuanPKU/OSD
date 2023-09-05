@@ -125,7 +125,7 @@ class SmallModelKVCacheProposer(Proposer):
             propose_logits.append(outputs.logits[:, -1, :])
             if next_token_id.item() == self.tokenizer.eos_token_id:
                 generated_len = i + 1
-                print(f"[Info] Stop at {generated_len} because of eos")
+                # print(f"[Info] Stop at {generated_len} because of eos")
                 break
             input_ids = next_token_id
         propose_tokens = torch.cat(propose_tokens, dim=-1)
