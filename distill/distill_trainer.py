@@ -83,8 +83,11 @@ class DistillTrainer(Trainer):
                                            teacher_logits / temperature,
                                            mask)
             else:
+                vocab_size = student_logits.shape[-1]
+                student_logits = student_logits.reshape(-1, vocab_size)
+                generated_token_ids = teacher_outputs["sequences"][:, -gen_len:].reshape(-1)
                 loss = torch.nn.functional.cross_entropy(student_logits / temperature, 
-                                                         teacher_outputs["sequences"],
+                                                         generated_token_ids,
                                                          ignore_index=self.tokenizer.pad_token_id)
         else:
             student_outputs = model(
