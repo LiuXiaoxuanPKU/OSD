@@ -31,6 +31,9 @@ def target_sample_from_distribution(target_distribution, draft_distribution):
     distribution = (target_distribution - draft_distribution)
     distribution = torch.max(distribution,
                              torch.zeros_like(distribution))
+    if (distribution.sum(dim=-1, keepdim=True) == 0).any():
+        distribution = torch.where(distribution == 0, distribution + 1e-10, distribution)
+        print("[Warning] Distribution contains zero values")
     distribution = distribution / distribution.sum(dim=-1, keepdim=True)
     return torch.multinomial(distribution, num_samples=1).squeeze(-1)
 
