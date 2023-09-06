@@ -63,8 +63,8 @@ class DistillTrainer(Trainer):
                     output_scores=True,
                     return_dict_in_generate=True,
                 )
-            teacher_logits = torch.cat(
-                [score.unsqueeze(1) for score in teacher_outputs["scores"]], dim=1)
+                teacher_logits = torch.cat(
+                    [score.unsqueeze(1) for score in teacher_outputs["scores"]], dim=1)
 
             bsz, total_seq_len = teacher_outputs["sequences"].shape
             gen_len = len(teacher_outputs["scores"])
@@ -73,7 +73,7 @@ class DistillTrainer(Trainer):
             student_outputs = model(
                 input_ids=teacher_outputs.sequences,
                 attention_mask=attention_mask)
-            student_logits = student_outputs.logits[:, -gen_len:, :]
+            student_logits = student_outputs.logits[:, -gen_len-1:-1, :]
 
             mask = teacher_outputs["sequences"][:, -
                                                 gen_len:] == self.tokenizer.pad_token_id
@@ -114,6 +114,7 @@ class DistillTrainer(Trainer):
         loss.backward()
         return loss.detach()
 
+    @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         output = self.generator.generate(inputs["input_ids"], 200)
         find = False
