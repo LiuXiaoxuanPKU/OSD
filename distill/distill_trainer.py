@@ -75,11 +75,17 @@ class DistillTrainer(Trainer):
                 attention_mask=attention_mask)
             student_logits = student_outputs.logits[:, -gen_len-1:-1, :]
 
-            mask = teacher_outputs["sequences"][:, -
-                                                gen_len:] == self.tokenizer.pad_token_id
-            loss = self.soft_cross_entropy(student_logits / temperature,
+            use_logits = False
+            if use_logits:
+                mask = teacher_outputs["sequences"][:, -
+                                                    gen_len:] == self.tokenizer.pad_token_id
+                loss = self.soft_cross_entropy(student_logits / temperature,
                                            teacher_logits / temperature,
                                            mask)
+            else:
+                loss = torch.nn.functional.cross_entropy(student_logits / temperature, 
+                                                         teacher_outputs["sequences"],
+                                                         ignore_index=self.tokenizer.pad_token_id)
         else:
             student_outputs = model(
                 input_ids=inputs['input_ids'],
