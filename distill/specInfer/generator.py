@@ -10,7 +10,7 @@ from specInfer.logger import SpecLogger
 from dataclasses import dataclass
 from typing import List
 
-logger = SpecLogger("output/generator.info")
+# logger = SpecLogger("output/generator.info")
 
 @dataclass
 class GeneratorOutput:

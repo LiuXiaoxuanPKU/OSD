@@ -101,11 +101,11 @@ class DistillTrainer(Trainer):
                     attention_mask=attention_mask
                 )
                 teacher_logits = teacher_outputs.logits
-                log_ratio = (teacher_logits.log_softmax(-1).gather(-1, response_ids) -
-                             student_logits.log_softmax(-1).gather(-1, response_ids)).sum(dim=1)
+                log_ratio = (teacher_logits.log_softmax(-1).gather(-1, student_outputs["sequences"]) -
+                             student_logits.log_softmax(-1).gather(-1, student_outputs["sequences"])).sum(dim=1)
 
             loss = torch.nn.functional.cross_entropy(
-                student_logits / temperature, response_ids, reduction='none') * (log_ratio - 1)
+                student_logits / temperature, student_outputs["sequences"], reduction='none') * (log_ratio - 1)
             loss = loss.mean()
 
         if self.args.gradient_accumulation_steps > 1:
