@@ -128,13 +128,13 @@ class SmallModelKVCacheProposer(Proposer):
                                  past_key_values=past_key_values,
                                  use_cache=True)
             past_key_values = outputs.past_key_values
-            next_token_logits = outputs.logits[:, -1, :]
+            next_token_logits = outputs.logits[:, -1, :] # next_token_logits has shape [1, vocab_size]
             distribution = sample_method(next_token_logits)
             next_token_id = torch.multinomial(distribution, num_samples=1)
             
+            propose_logits.append(next_token_logits)
             propose_distributions.append(distribution)
             propose_tokens.append(next_token_id)
-            propose_logits.append(outputs.logits[:, -1, :])
             
             if next_token_id.item() == self.tokenizer.eos_token_id:
                 generated_len = i + 1
@@ -142,7 +142,6 @@ class SmallModelKVCacheProposer(Proposer):
                 break
             input_ids = next_token_id
         propose_tokens = torch.cat(propose_tokens, dim=-1)
-        # TODO, why is it 0 here?
         propose_logits = torch.cat(propose_logits, dim=0)
         propose_distributions = torch.cat(propose_distributions, dim=0)
         return OutputAndCache(generated_len, propose_tokens,

@@ -4,8 +4,7 @@ from typing import Tuple
 from specInfer.common import (InputAndCache,
                               OutputAndCache,
                               crop_past_key_values,
-                              sychronize_time,
-                              sample_fn)
+                              sychronize_time)
 from transformers import LogitsProcessorList
 import numpy as np
 
@@ -23,7 +22,7 @@ class Verifier:
         self.adjust_input_time = 0
         self.benchmark_time = benchmark_time
 
-    def verify(self, input: InputAndCache, 
+    def verify(self, input: InputAndCache,
                propose_len: int,
                sample_method) -> Tuple[InputAndCache, torch.Tensor]:
         if self.benchmark_time:
@@ -39,7 +38,10 @@ class Verifier:
 
         if self.benchmark_time:
             self.verify_times.append(sychronize_time() - start)
-        return OutputAndCache(generated_len, None, sample_method(logits.squeeze(0)), outputs.past_key_values)
+        # output logits/distribution has shape [# of proposed tokens, vocab_size]
+        # we squeeze the batch size dimension in the output because it is always 1
+        return OutputAndCache(generated_len, None, logits.squeeze(0),
+                              sample_method(logits.squeeze(0)), outputs.past_key_values)
 
     def prepare_input(self, proposer_output: OutputAndCache,
                       verifier_input: InputAndCache) -> InputAndCache:
@@ -93,7 +95,7 @@ class Verifier:
 
     def print_time(self):
         if self.benchmark_time:
-            print(f"[Verifier] prompt phase: {self.verify_times[0]}, " 
+            print(f"[Verifier] prompt phase: {self.verify_times[0]}, "
                   f"decode phase: {np.median(self.verify_times[1:])}, ",
                   f"set prompt time: {self.set_prompt_time}, ",
                   f"adjust time: {self.adjust_input_time}, ",

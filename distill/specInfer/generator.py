@@ -90,7 +90,7 @@ class Generator:
         # if all tokens were accepted, sample a last one
         if all_accepted:
             next_token_id = torch.multinomial(
-                verified_output.output_distribution[-1, :], num_samples=1).squeeze(-1)
+                verified_output.output_distribution[-1, :], num_samples=1)
 
             assert next_token_id.dim() == 1
             accept_ids.append(next_token_id)
