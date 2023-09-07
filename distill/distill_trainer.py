@@ -6,12 +6,6 @@ from specInfer.generator import Generator
 from enum import Enum
 
 
-# class LossMethod(Enum):
-#     TeacherKL = 1
-#     StudentKL = 2
-#     ReverseKL = 3
-
-
 class DistillTrainer(Trainer):
     def __init__(self,
                  teacher_model,
@@ -35,39 +29,22 @@ class DistillTrainer(Trainer):
         mean_entropy = entropy.sum() / (~padding_mask).sum()
         return mean_entropy
 
-    def training_step_old(self, model, inputs):
-        # Usual forward pass with the base model
-        _, student_outputs = super().compute_loss(model, inputs, return_outputs=True)
-        # Forward pass with the larger model
-        with torch.no_grad():
-            teacher_outputs = self.teacher_model(**inputs)
-
-        padding_mask = inputs["labels"].eq(LabelSmoother.ignore_index)
-        if self.loss_model == "soft_only":
-            temperature = 1
-            loss = self.soft_cross_entropy(student_outputs.logits / temperature,
-                                           teacher_outputs.logits / temperature,
-                                           padding_mask)
-        else:
-            raise NotImplementedError()
-
-        if self.args.gradient_accumulation_steps > 1:
-            loss = loss / self.args.gradient_accumulation_steps
-
-        loss.backward()
-        return loss.detach()
-
-    def get_generated_ids(self, model, input_ids, attention_mask, max_new_tokens):
+    def get_generated_ids(self, model, 
+                          input_ids, attention_mask, 
+                          max_new_tokens, require_logits):
         with torch.no_grad():
             outputs = model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 max_new_tokens=max_new_tokens,
-                output_scores=True,
+                output_scores=require_logits,
                 return_dict_in_generate=True,
             )
-            logits = torch.cat(
-                [score.unsqueeze(1) for score in outputs["scores"]], dim=1)
+            if require_logits:
+                logits = torch.cat(
+                    [score.unsqueeze(1) for score in outputs["scores"]], dim=1)
+            else:
+                logits = None
             return outputs["sequences"], logits
 
     def get_logits(self, model, input_ids, attention_mask):
@@ -79,22 +56,21 @@ class DistillTrainer(Trainer):
     def training_step(self, model, inputs):
         max_new_tokens = 128
         temperature = 1
-        # method = LossMethod.TeacherKL
-
-        sample_method = "teacher"
+        sample_method = "student"
         kl_method = "teacher_student"
 
         # sample token ids
         sample_model = model if sample_method == "student" else self.teacher_model
+        require_logits = True if sample_method == "teacher" else False
         generated_ids, generated_logits = self.get_generated_ids(sample_model,
                                                                  inputs['input_ids'],
                                                                  inputs['attention_mask'],
-                                                                 max_new_tokens)
+                                                                 max_new_tokens,
+                                                                 require_logits)
 
         # prepare inputs for getting logits
         bsz, total_seq_len = generated_ids.shape
         gen_len = total_seq_len - inputs['input_ids'].shape[-1]
-        output_mask = generated_ids != self.tokenizer.pad_token_id
         attention_mask = torch.cat([inputs['attention_mask'],
                                     torch.ones((bsz, gen_len), device='cuda', dtype=torch.long)], dim=1)
 
@@ -108,54 +84,18 @@ class DistillTrainer(Trainer):
                 teacher_logits = self.get_logits(model, generated_ids, attention_mask)[
                     :, -gen_len-1:-1, :]
             student_logits = self.get_logits(
-                self.teacher_model, generated_ids, attention_mask)[:, -gen_len-1:-1, :]
+                self.model, generated_ids, attention_mask)[:, -gen_len-1:-1, :]
 
         # calculate loss with kl divergence
-        output_mask = generated_ids[:, -gen_len:] != self.tokenizer.pad_token_id
+        output_mask = generated_ids[:, -gen_len:] == self.tokenizer.pad_token_id
         if kl_method == "teacher_student":
-            self.soft_cross_entropy(student_logits / temperature,
+            loss = self.soft_cross_entropy(student_logits / temperature,
                                     teacher_logits / temperature,
                                     output_mask)
         else:
             raise NotImplementedError()
 
-        # if method == LossMethod.TeacherKL:
-        #     with torch.no_grad():
-        #         teacher_outputs = self.teacher_model.generate(
-        #             input_ids=inputs['input_ids'],
-        #             attention_mask=inputs['attention_mask'],
-        #             max_new_tokens=max_new_tokens,
-        #             output_scores=True,
-        #             return_dict_in_generate=True,
-        #         )
-        #         teacher_logits = torch.cat(
-        #             [score.unsqueeze(1) for score in teacher_outputs["scores"]], dim=1)
-
-        #     bsz, total_seq_len = teacher_outputs["sequences"].shape
-        #     gen_len = len(teacher_outputs["scores"])
-        #     attention_mask = torch.cat([inputs['attention_mask'],
-        #                                 torch.ones((bsz, gen_len), device='cuda', dtype=torch.long)], dim=1)
-        #     student_outputs = model(
-        #         input_ids=teacher_outputs.sequences,
-        #         attention_mask=attention_mask)
-        #     student_logits = student_outputs.logits[:, -gen_len-1:-1, :]
-
-        #     use_logits = False
-        #     if use_logits:
-        #         mask = teacher_outputs["sequences"][:, -
-        #                                             gen_len:] == self.tokenizer.pad_token_id
-        #         loss = self.soft_cross_entropy(student_logits / temperature,
-        #                                        teacher_logits / temperature,
-        #                                        mask)
-        #     else:
-        #         vocab_size = student_logits.shape[-1]
-        #         student_logits = student_logits.reshape(-1, vocab_size)
-        #         generated_token_ids = teacher_outputs["sequences"][:, -
-        #                                                            gen_len:].reshape(-1)
-        #         loss = torch.nn.functional.cross_entropy(student_logits / temperature,
-        #                                                  generated_token_ids,
-        #                                                  ignore_index=self.tokenizer.pad_token_id)
-        # elif method == LossMethod.StudentKL:
+        # if method == LossMethod.StudentKL:
         #     with torch.no_grad():
         #         student_outputs = model.generate(
         #             input_ids=inputs['input_ids'],
