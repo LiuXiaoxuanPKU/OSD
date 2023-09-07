@@ -14,19 +14,11 @@ class OutputAndCache:
     generated_len: int
     output_ids: torch.Tensor
     output_logits: torch.Tensor
+    output_distribution: torch.Tensor
     past_key_values: torch.Tensor
     
 
 ########################### Sampling ########################
-def get_temperature_distribution(logits, temperature):
-    return torch.softmax(logits / temperature, dim=-1)
-
-def sample_fn(logits, temperature):
-    distribution = get_temperature_distribution(logits, temperature)
-    if distribution.dim() > 2:
-        distribution = distribution.squeeze(0)
-    return torch.multinomial(distribution, num_samples=1).squeeze(-1)
-
 def target_sample_from_distribution(target_distribution, draft_distribution):
     distribution = (target_distribution - draft_distribution)
     distribution = torch.max(distribution,

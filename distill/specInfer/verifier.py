@@ -23,7 +23,9 @@ class Verifier:
         self.adjust_input_time = 0
         self.benchmark_time = benchmark_time
 
-    def verify(self, input: InputAndCache, propose_len: int) -> Tuple[InputAndCache, torch.Tensor]:
+    def verify(self, input: InputAndCache, 
+               propose_len: int,
+               sample_method) -> Tuple[InputAndCache, torch.Tensor]:
         if self.benchmark_time:
             start = sychronize_time()
 
@@ -37,7 +39,7 @@ class Verifier:
 
         if self.benchmark_time:
             self.verify_times.append(sychronize_time() - start)
-        return OutputAndCache(generated_len, None, logits.squeeze(0), outputs.past_key_values)
+        return OutputAndCache(generated_len, None, sample_method(logits.squeeze(0)), outputs.past_key_values)
 
     def prepare_input(self, proposer_output: OutputAndCache,
                       verifier_input: InputAndCache) -> InputAndCache:

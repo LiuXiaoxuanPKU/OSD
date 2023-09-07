@@ -3,9 +3,9 @@ from typing import List
 from specInfer.common import (InputAndCache,
                               OutputAndCache,
                               crop_past_key_values,
-                              sychronize_time,
-                              sample_fn)
+                              sychronize_time)
 import numpy as np
+
 
 class Proposer:
     def __init__(self, benchmark_time=False) -> None:
@@ -14,11 +14,17 @@ class Proposer:
 
         self.benchmark_time = benchmark_time
 
-    def propose(self, input: InputAndCache, n: int) -> OutputAndCache:
+    # sample_method:
+    #   input: logits
+    #   output: probability distribution
+    def propose(self,
+                input: InputAndCache,
+                n: int,
+                sample_method) -> OutputAndCache:
         if self.benchmark_time:
             start = sychronize_time()
 
-        ret = self.propose_impl(input, n)
+        ret = self.propose_impl(input, n, sample_method)
 
         if self.benchmark_time:
             self.propose_times.append(sychronize_time() - start)
@@ -103,14 +109,17 @@ class SmallModelKVCacheProposer(Proposer):
         self.model = model
         self.tokenizer = tokenizer
 
-    def propose_impl(self, input: InputAndCache, n: int) -> OutputAndCache:
+    def propose_impl(self,
+                     input: InputAndCache,
+                     n: int,
+                     sample_method) -> OutputAndCache:
         if input.input_ids.shape[0] > 1:
             raise NotImplementedError(
                 "Not implement for batch_size > 1 in evaluation")
 
-        temperature = 0.1
         propose_tokens = []
         propose_logits = []
+        propose_distributions = []
         input_ids = input.input_ids
         past_key_values = input.past_key_values
         generated_len = n
@@ -120,17 +129,25 @@ class SmallModelKVCacheProposer(Proposer):
                                  use_cache=True)
             past_key_values = outputs.past_key_values
             next_token_logits = outputs.logits[:, -1, :]
-            next_token_id = sample_fn(next_token_logits, temperature).unsqueeze(0)
+            distribution = sample_method(next_token_logits)
+            next_token_id = torch.multinomial(distribution, num_samples=1)
+            
+            propose_distributions.append(distribution)
             propose_tokens.append(next_token_id)
             propose_logits.append(outputs.logits[:, -1, :])
+            
             if next_token_id.item() == self.tokenizer.eos_token_id:
                 generated_len = i + 1
                 # print(f"[Info] Stop at {generated_len} because of eos")
                 break
             input_ids = next_token_id
         propose_tokens = torch.cat(propose_tokens, dim=-1)
+        # TODO, why is it 0 here?
         propose_logits = torch.cat(propose_logits, dim=0)
-        return OutputAndCache(generated_len, propose_tokens, propose_logits, past_key_values)
+        propose_distributions = torch.cat(propose_distributions, dim=0)
+        return OutputAndCache(generated_len, propose_tokens,
+                              propose_logits, propose_distributions,
+                              past_key_values)
 
     def adjust_input_impl(self, accept_token_ids: torch.Tensor,
                           proposer_input: InputAndCache,

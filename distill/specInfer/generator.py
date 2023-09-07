@@ -1,8 +1,6 @@
 import torch
 from specInfer.common import (OutputAndCache,
-                              get_temperature_distribution,
-                              target_sample_from_distribution,
-                              sample_fn)
+                              target_sample_from_distribution)
 from specInfer.proposer import SmallModelProposer, SmallModelKVCacheProposer
 from specInfer.verifier import Verifier
 from specInfer.common import sychronize_time, InputAndCache
@@ -12,6 +10,7 @@ from typing import List
 
 # logger = SpecLogger("output/generator.info")
 
+
 @dataclass
 class GeneratorOutput:
     output: List[str]
@@ -19,11 +18,12 @@ class GeneratorOutput:
     propose_steps: int
     sample_steps: int
     alpha_sum: float
-    
+
+
 class Generator:
-    def __init__(self, 
-                 small_model, 
-                 large_model, 
+    def __init__(self,
+                 small_model,
+                 large_model,
                  tokenizer,
                  max_propose_num) -> None:
         self.model = large_model
@@ -31,14 +31,14 @@ class Generator:
         # metrics
         self.benchmark_time = False
         self.generation_time = []
-        
-        self.proposer = SmallModelKVCacheProposer(small_model, tokenizer, self.benchmark_time)
+
+        self.proposer = SmallModelKVCacheProposer(
+            small_model, tokenizer, self.benchmark_time)
         # self.proposer = SmallModelProposer(small_model, tokenizer)
         self.verifier = Verifier(large_model, tokenizer, self.benchmark_time)
 
         # parameters
         self.max_propose_num = max_propose_num
-
 
     def compare_tokens(self, proposed_output: OutputAndCache, verified_output: OutputAndCache) -> torch.Tensor:
         assert proposed_output.output_ids.shape == verified_output.output_ids[:, :-1].shape, \
@@ -52,15 +52,9 @@ class Generator:
                      verified_output.output_ids[:, :-1])).cumsum(dim=-1) < 1).sum()
         return verified_output.output_ids[:, :n_matches + 1], -1, -1
 
-    def sample_tokens(self, 
-                      proposed_output: OutputAndCache, 
-                      verified_output: OutputAndCache,
-                      temperature: float) -> torch.Tensor:
-        target_distribution = get_temperature_distribution(
-            verified_output.output_logits, temperature=temperature)
-        draft_distribution = get_temperature_distribution(
-            proposed_output.output_logits, temperature=temperature)
-
+    def sample_tokens(self,
+                      proposed_output: OutputAndCache,
+                      verified_output: OutputAndCache) -> torch.Tensor:
         # Accept-reject token loop
         accept_ids = []
         all_accepted = True
@@ -68,34 +62,36 @@ class Generator:
         alpha = 0
         for t in range(proposed_output.generated_len):
             sampled_ratios = (
-                target_distribution[t, proposed_output.output_ids[0, t]]
-                / draft_distribution[t, proposed_output.output_ids[0, t]]
+                verified_output.output_distribution[t,
+                                                    proposed_output.output_ids[0, t]]
+                / proposed_output.output_distribution[t, proposed_output.output_ids[0, t]]
             )
             sampled_ratios = torch.min(sampled_ratios,
                                        torch.ones_like(sampled_ratios))
             rs = torch.rand_like(sampled_ratios)
             # logger.log("sample ratio", (rs, sampled_ratios))
-            cur_alpha = min(target_distribution[t, proposed_output.output_ids[0, t]], 
-                            draft_distribution[t, proposed_output.output_ids[0, t]])
+            cur_alpha = min(verified_output.output_distribution[t, proposed_output.output_ids[0, t]],
+                            proposed_output.output_distribution[t, proposed_output.output_ids[0, t]])
 
             assert cur_alpha >= 0 and cur_alpha <= 1
             alpha += cur_alpha
             sample_steps += 1
-            
+
             if rs < sampled_ratios:
                 accept_ids.append(proposed_output.output_ids[:, t])
             else:
                 all_accepted = False
                 next_token_id = target_sample_from_distribution(
-                    target_distribution[t, :],
-                    draft_distribution[t, :])
+                    verified_output.output_distribution[t, :],
+                    proposed_output.output_distribution[t, :])
                 accept_ids.append(next_token_id.unsqueeze(0))
                 break
 
         # if all tokens were accepted, sample a last one
         if all_accepted:
-            next_token_id = sample_fn(
-                verified_output.output_logits[-1, :], temperature).unsqueeze(0)
+            next_token_id = torch.multinomial(
+                verified_output.output_distribution[-1, :], num_samples=1).squeeze(-1)
+
             assert next_token_id.dim() == 1
             accept_ids.append(next_token_id)
 
@@ -103,7 +99,10 @@ class Generator:
         return accept_ids.unsqueeze(0), alpha, sample_steps
 
     @torch.inference_mode()
-    def generate(self, input_ids, max_tokens, temperature=1):
+    def generate(self, input_ids, max_tokens, temperature=0.01):
+        def sample_method(logits):
+            return torch.softmax(logits / temperature, dim=-1)
+
         generated_token_cnt = 0
         generated_tokens = None
         proposer_input = InputAndCache(
@@ -118,7 +117,9 @@ class Generator:
             start = sychronize_time()
             # propose n tokens, proposer always propose the token with highest probability
             proposer_output = self.proposer.propose(
-                proposer_input, self.max_propose_num)
+                proposer_input,
+                self.max_propose_num,
+                sample_method)
             propose_steps += 1
 
             # prepare verifier input
@@ -127,12 +128,14 @@ class Generator:
 
             # forward n tokens on the model in the a single run
             verifier_output = self.verifier.verify(
-                verifier_input, proposer_output.generated_len)
+                verifier_input,
+                proposer_output.generated_len,
+                sample_method)
 
             # compare selected tokens
             # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
             accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
-                proposer_output, verifier_output, temperature)
+                proposer_output, verifier_output)
             alpha += cur_alpha
             sample_steps += cur_sample_steps
             # logger.log("acc_tokens", accept_token_ids)
@@ -163,12 +166,13 @@ class Generator:
         self.proposer.print_time()
         self.verifier.print_time()
         self.print_time()
-        return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens), 
-                correct_tokens, 
-                propose_steps,
-                sample_steps, alpha)
+        return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens),
+                               correct_tokens,
+                               propose_steps,
+                               sample_steps, alpha)
 
     def print_time(self):
         if self.benchmark_time:
             print(f"[Generator time]: {self.generation_time}")
-            print(f"[Max allocated memory]: {torch.cuda.max_memory_allocated() / 1024 / 1024} MB")
+            print(
+                f"[Max allocated memory]: {torch.cuda.max_memory_allocated() / 1024 / 1024} MB")

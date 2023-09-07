@@ -3,7 +3,12 @@ from transformers import Trainer, TrainerCallback
 from transformers.trainer_pt_utils import LabelSmoother
 import wandb
 from specInfer.generator import Generator
+from enum import Enum
 
+class LossMethod(Enum):
+    TeacherKL = 1
+    StudentKL = 2
+    ReverseKL = 3
 
 class DistillTrainer(Trainer):
     def __init__(self,
@@ -53,8 +58,8 @@ class DistillTrainer(Trainer):
     def training_step(self, model, inputs):
         max_new_tokens = 128
         temperature = 1
-        use_kl = False
-        if use_kl:
+        method = LossMethod.TeacherKL
+        if method == LossMethod.TeacherKL:
             with torch.no_grad():
                 teacher_outputs = self.teacher_model.generate(
                     input_ids=inputs['input_ids'],
@@ -89,7 +94,39 @@ class DistillTrainer(Trainer):
                 loss = torch.nn.functional.cross_entropy(student_logits / temperature, 
                                                          generated_token_ids,
                                                          ignore_index=self.tokenizer.pad_token_id)
-        else:
+        elif method == LossMethod.StudentKL:
+            with torch.no_grad():
+                student_outputs = model.generate(
+                    input_ids=inputs['input_ids'],
+                    attention_mask=inputs['attention_mask'],
+                    max_new_tokens=max_new_tokens,
+                    return_dict_in_generate=True)
+            
+            bsz, total_seq_len = student_outputs["sequences"].shape
+            gen_len = total_seq_len - inputs['input_ids'].shape[-1]
+            generated_token_ids = student_outputs["sequences"][:, -gen_len:]
+            output_mask = generated_token_ids != self.tokenizer.pad_token_id
+            attention_mask = torch.cat([inputs['attention_mask'],
+                                        torch.ones((bsz, gen_len), device='cuda', dtype=torch.long)], dim=1)     
+            student_logits = model(
+                input_ids=student_outputs["sequences"],
+                attention_mask=attention_mask,
+                ).logits[:, -gen_len-1:-1, :]
+            
+            with torch.no_grad():
+                teacher_outputs = self.teacher_model(
+                    input_ids=student_outputs["sequences"],
+                    attention_mask=attention_mask
+                )
+                teacher_logits = teacher_outputs.logits[:, -gen_len-1:-1, :]
+            
+            mask = student_outputs["sequences"][:, -
+                                                    gen_len:] == self.tokenizer.pad_token_id
+            loss = self.soft_cross_entropy(student_logits / temperature,
+                                           teacher_logits / temperature,
+                                           mask)
+                
+        elif method == LossMethod.ReverseKL:
             with torch.no_grad():
                 student_outputs = model.generate(
                     input_ids=inputs['input_ids'],
