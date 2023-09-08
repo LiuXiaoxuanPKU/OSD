@@ -57,7 +57,7 @@ class DistillTrainer(Trainer):
         max_new_tokens = 128
         temperature = 1
         sample_method = "student"
-        kl_method = "teacher_student"
+        kl_method = "student_teacher"
 
         # sample token ids
         sample_model = model if sample_method == "student" else self.teacher_model
@@ -89,6 +89,22 @@ class DistillTrainer(Trainer):
             loss = self.soft_cross_entropy(student_logits / temperature,
                                     teacher_logits / temperature,
                                     output_mask)
+        elif kl_method == "student_teacher":
+            with torch.no_grad():
+                vocab_size = teacher_logits.shape[-1]
+                teacher_logits = teacher_logits.reshape(-1, vocab_size)
+                student_logits = student_logits.reshape(-1, vocab_size)
+                generated_ids = generated_ids.reshape(-1, 1)
+                log_ratio = (teacher_logits.log_softmax(-1).gather(-1, generated_ids) -
+                            student_logits.log_softmax(-1).gather(-1, generated_ids))
+                log_ratio = log_ratio.reshape(bsz, gen_len).sum(dim=1)[:, None]
+            cross_entropy = torch.nn.functional.cross_entropy(
+                student_logits / temperature,
+                generated_ids.squeeze(-1),
+                ignore_index=self.tokenizer.pad_token_id,
+                reduction='none').reshape(bsz, gen_len)
+            loss = cross_entropy * (log_ratio - 1)
+            loss = (loss * (~output_mask)).sum() / (~output_mask).sum()
         else:
             raise NotImplementedError()
 
