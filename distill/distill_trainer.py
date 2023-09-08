@@ -32,8 +32,8 @@ class DistillTrainer(Trainer):
     def get_kl(self, predicts, targets, padding_mask):
         kl_loss = torch.nn.KLDivLoss(reduction="none")
         predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
-        targets_log_prob = torch.nn.functional.softmax(targets, dim=-1)
-        output = kl_loss(predict_log_prob, targets_log_prob, log_target=True)
+        targets_prob = torch.nn.functional.softmax(targets, dim=-1)
+        output = kl_loss(predict_log_prob, targets_prob)
         expand_mask = padding_mask.unsqueeze(-1).expand_as(output)
         output.masked_fill_(expand_mask, 0)
         mean_output = output.sum() / (~padding_mask).sum()
