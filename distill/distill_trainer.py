@@ -4,7 +4,12 @@ from transformers.trainer_pt_utils import LabelSmoother
 import wandb
 from specInfer.generator import Generator
 from enum import Enum
+import random
 
+class SampleSource(Enum):
+    Student = 1
+    Teacher = 2
+    Mix = 3
 
 class DistillTrainer(Trainer):
     def __init__(self,
@@ -66,12 +71,21 @@ class DistillTrainer(Trainer):
     def training_step(self, model, inputs):
         max_new_tokens = 128
         temperature = 1
-        sample_method = "student"
-        kl_method = "student_teacher"
+        sample_source = SampleSource.Mix
+        kl_method = "teacher_student"
 
         # sample token ids
-        sample_model = model if sample_method == "student" else self.teacher_model
-        require_logits = True if sample_method == "teacher" else False
+        if sample_source == SampleSource.Student:
+            sample_model = model
+        elif sample_source == SampleSource.Teacher:
+            sample_model = self.teacher_model
+        elif sample_source == SampleSource.Mix:
+             l = random.random()
+             sample_model = model if l < 0.5 else self.teacher_model
+        else:
+            raise ValueError()
+        
+        require_logits = True if sample_model == self.teacher_model else False
         generated_ids, generated_logits = self.get_generated_ids(sample_model,
                                                                  inputs['input_ids'],
                                                                  inputs['attention_mask'],
@@ -87,7 +101,7 @@ class DistillTrainer(Trainer):
         # get student/teacher logits
         student_logits = self.get_logits(model, generated_ids, attention_mask)[:, -gen_len-1:-1, :]
         with torch.no_grad():
-            if sample_method == "teacher":
+            if generated_logits is not None:
                 teacher_logits = generated_logits
             else:
                 teacher_logits = self.get_logits(self.teacher_model, generated_ids, attention_mask)[
