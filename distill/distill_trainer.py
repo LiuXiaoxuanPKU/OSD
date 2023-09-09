@@ -44,7 +44,7 @@ class DistillTrainer(Trainer):
         mean_output = output.sum() / (~padding_mask).sum()
         return mean_output
     
-    def get_generated_ids(self, model, 
+    def get_generated_ids(self, model, pad_token_id,
                           input_ids, attention_mask, 
                           max_new_tokens, require_logits):
         with torch.no_grad():
@@ -54,6 +54,7 @@ class DistillTrainer(Trainer):
                 max_new_tokens=max_new_tokens,
                 output_scores=require_logits,
                 return_dict_in_generate=True,
+                pad_token_id=pad_token_id
             )
             if require_logits:
                 logits = torch.cat(
@@ -72,7 +73,7 @@ class DistillTrainer(Trainer):
         max_new_tokens = 128
         temperature = 1
         sample_source = SampleSource.Student
-        kl_method = "exact"
+        kl_method = "teacher_student"
 
         # sample token ids
         if sample_source == SampleSource.Student:
@@ -87,6 +88,7 @@ class DistillTrainer(Trainer):
         
         require_logits = True if sample_model == self.teacher_model else False
         generated_ids, generated_logits = self.get_generated_ids(sample_model,
+                                                                 self.tokenizer.pad_token_id,
                                                                  inputs['input_ids'],
                                                                  inputs['attention_mask'],
                                                                  max_new_tokens,
@@ -126,7 +128,6 @@ class DistillTrainer(Trainer):
                 log_ratio = (teacher_logits.log_softmax(-1).gather(-1, generated_ids) -
                             student_logits.log_softmax(-1).gather(-1, generated_ids))
                 log_ratio = log_ratio.reshape(bsz, gen_len).sum(dim=1)[:, None]
-            print(log_ratio)
             cross_entropy = torch.nn.functional.cross_entropy(
                 student_logits / temperature,
                 generated_ids.squeeze(-1),
