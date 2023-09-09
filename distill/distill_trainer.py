@@ -71,8 +71,8 @@ class DistillTrainer(Trainer):
     def training_step(self, model, inputs):
         max_new_tokens = 128
         temperature = 1
-        sample_source = SampleSource.Mix
-        kl_method = "teacher_student"
+        sample_source = SampleSource.Student
+        kl_method = "exact"
 
         # sample token ids
         if sample_source == SampleSource.Student:
@@ -118,14 +118,15 @@ class DistillTrainer(Trainer):
                                student_logits / temperature,
                                output_mask)
         elif kl_method == "exact":
+            vocab_size = teacher_logits.shape[-1]
+            teacher_logits = teacher_logits.reshape(-1, vocab_size)
+            student_logits = student_logits.reshape(-1, vocab_size)
+            generated_ids = generated_ids[:, -gen_len:].reshape(-1, 1)
             with torch.no_grad():
-                vocab_size = teacher_logits.shape[-1]
-                teacher_logits = teacher_logits.reshape(-1, vocab_size)
-                student_logits = student_logits.reshape(-1, vocab_size)
-                generated_ids = generated_ids.reshape(-1, 1)
                 log_ratio = (teacher_logits.log_softmax(-1).gather(-1, generated_ids) -
                             student_logits.log_softmax(-1).gather(-1, generated_ids))
                 log_ratio = log_ratio.reshape(bsz, gen_len).sum(dim=1)[:, None]
+            print(log_ratio)
             cross_entropy = torch.nn.functional.cross_entropy(
                 student_logits / temperature,
                 generated_ids.squeeze(-1),
