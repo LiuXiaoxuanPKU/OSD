@@ -44,7 +44,7 @@ class DistillTrainer(Trainer):
         mean_output = output.sum() / (~padding_mask).sum()
         return mean_output
     
-    def get_generated_ids(self, model, pad_token_id,
+    def get_generated_ids(self, model, tokenizer,
                           input_ids, attention_mask, 
                           max_new_tokens, require_logits):
         with torch.no_grad():
@@ -54,7 +54,9 @@ class DistillTrainer(Trainer):
                 max_new_tokens=max_new_tokens,
                 output_scores=require_logits,
                 return_dict_in_generate=True,
-                pad_token_id=pad_token_id
+                pad_token_id=tokenizer.pad_token_id,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id
             )
             if require_logits:
                 logits = torch.cat(
@@ -88,7 +90,7 @@ class DistillTrainer(Trainer):
         
         require_logits = True if sample_model == self.teacher_model else False
         generated_ids, generated_logits = self.get_generated_ids(sample_model,
-                                                                 self.tokenizer.pad_token_id,
+                                                                 self.tokenizer,
                                                                  inputs['input_ids'],
                                                                  inputs['attention_mask'],
                                                                  max_new_tokens,

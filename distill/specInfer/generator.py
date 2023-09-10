@@ -25,16 +25,20 @@ class Generator:
                  small_model,
                  large_model,
                  tokenizer,
-                 max_propose_num) -> None:
+                 max_propose_num,
+                 use_cache=True) -> None:
         self.model = large_model
         self.tokenizer = tokenizer
         # metrics
         self.benchmark_time = False
         self.generation_time = []
 
-        self.proposer = SmallModelKVCacheProposer(
-            small_model, tokenizer, self.benchmark_time)
-        # self.proposer = SmallModelProposer(small_model, tokenizer)
+        if use_cache:
+            self.proposer = SmallModelKVCacheProposer(
+                small_model, tokenizer, self.benchmark_time)
+        else:
+            self.proposer = SmallModelProposer(
+                small_model, tokenizer, self.benchmark_time)
         self.verifier = Verifier(large_model, tokenizer, self.benchmark_time)
 
         # parameters

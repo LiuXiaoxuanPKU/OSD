@@ -4,6 +4,7 @@ from typing import Tuple
 from specInfer.common import (InputAndCache,
                               OutputAndCache,
                               crop_past_key_values,
+                              crop_mqa_past_key_values,
                               sychronize_time)
 from transformers import LogitsProcessorList
 import numpy as np
@@ -78,10 +79,17 @@ class Verifier:
 
         n_matches = accept_token_ids.shape[1]
         verifier_input_ids = accept_token_ids[:, -1]
-        verifier_generated_len = verifier_output.past_key_values[0][0].shape[2] - (
-            verifier_output.generated_len - 1) + n_matches
-        verifier_key_values = crop_past_key_values(
-            verifier_output.past_key_values, verifier_generated_len - 1)
+
+        if str(self.model.__class__.__name__) in ["GPTBigCodeForCausalLM"]:
+            verifier_generated_len = verifier_output.past_key_values[0].shape[-2] - (
+                verifier_output.generated_len - 1) + n_matches
+            verifier_key_values = crop_mqa_past_key_values(
+                verifier_output.past_key_values, verifier_generated_len - 1)
+        else:
+            verifier_generated_len = verifier_output.past_key_values[0][0].shape[2] - (
+                verifier_output.generated_len - 1) + n_matches
+            verifier_key_values = crop_past_key_values(
+                verifier_output.past_key_values, verifier_generated_len - 1)
 
         verifier_attn_masks = verifier_input.attention_mask[:,
                                                             :verifier_generated_len]

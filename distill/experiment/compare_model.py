@@ -40,29 +40,30 @@ def main(student_model_path,
     stats = torch.zeros(32000, dtype=torch.long, device='cuda')
     alpha, sample_steps = 0, 0
     for d in eval_dataset:
-        max_tokens = 512
+        max_tokens = 128
         input_ids = d["input_ids"].reshape(1, -1).cuda()
-        output = generator.generate(input_ids, max_tokens, temperature=1)
+        output = generator.generate(input_ids, max_tokens, temperature=0.01)
         correct_tokens = output.correct_tokens.squeeze(0)
+        print(5097 in correct_tokens.tolist())
         stats[correct_tokens] = stats[correct_tokens] + 1
         if i % 10 == 0:
             print(f"{i}/{len(eval_dataset)}")
-        # print("===================================")
-        # print(tokenizer.decode(d["input_ids"]))
-        # print(output.output)
-        # print(correct_tokens.shape)
-        # print(output.propose_steps, correct_tokens.shape[-1]/output.propose_steps)
-        # print("===================================")
+        print("===================================")
+        print(tokenizer.decode(d["input_ids"]))
+        print(output.output)
+        print(correct_tokens.shape)
+        print(output.propose_steps, correct_tokens.shape[-1]/output.propose_steps)
+        print("===================================")
         correctness += output.correct_tokens.shape[-1]/output.propose_steps
         alpha += output.alpha_sum
         sample_steps += output.sample_steps
         i += 1
-        # if i == 1:
-        #     break
+        if i == 10:
+            break
     print(i, correctness / i, alpha.item() / sample_steps)
 
-    # with open('output/spider.pkl', 'wb') as f:
-    #     pickle.dump(stats, f)
+    with open('output/ckpt500-spider.pkl', 'wb') as f:
+        pickle.dump(stats, f)
 
 def model_generate(model_path, data_path):
     tokenizer = AutoTokenizer.from_pretrained("/data/vicuna-7b-v1.3/")
@@ -96,7 +97,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--student", type=str,
                         help="student model path",
-                        default="eqhylxx/full-vicuna-160m")
+                        default="/data/fullvicuna160M_vicuna7B_spider_teacherkl_argmax/checkpoint-500")
     parser.add_argument("--teacher", type=str,
                         help="teacher model path",
                         default="/data/vicuna-7b-v1.3/")

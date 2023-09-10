@@ -3,6 +3,7 @@ from typing import List
 from specInfer.common import (InputAndCache,
                               OutputAndCache,
                               crop_past_key_values,
+                              crop_mqa_past_key_values,
                               sychronize_time)
 import numpy as np
 
@@ -74,26 +75,39 @@ class SmallModelProposer(Proposer):
         self.model = model
         self.tokenizer = tokenizer
 
-    def propose_impl(self, input: InputAndCache, n: int) -> OutputAndCache:
+    def propose_impl(self,
+                     input: InputAndCache,
+                     n: int,
+                     sample_method) -> OutputAndCache:
         if input.input_ids.shape[0] > 1:
             raise NotImplementedError(
                 "Not implement for batch_size > 1 in evaluation")
 
         propose_tokens = []
+        propose_distributions = []
         input_ids = input.input_ids
         generated_len = n
         for i in range(n):
             outputs = self.model(input_ids)
-            next_tokens = torch.argmax(outputs.logits[:, -1, :], dim=-1)
-            propose_tokens.append(next_tokens[0].item())
-            if next_tokens[0] == self.tokenizer.eos_token_id:
+            # next_token_logits has shape [1, vocab_size]
+            next_token_logits = outputs.logits[:, -1, :]
+            distribution = sample_method(next_token_logits)
+            next_token_id = torch.multinomial(distribution, num_samples=1)
+
+            propose_distributions.append(distribution)
+            propose_tokens.append(next_token_id)
+
+            if next_token_id.item() == self.tokenizer.eos_token_id:
                 generated_len = i + 1
+                # print(f"[Info] Stop at {generated_len} because of eos")
                 break
             input_ids = torch.cat(
-                [input_ids, next_tokens.reshape(1, 1)], dim=-1)
-        propose_tokens = torch.tensor(
-            propose_tokens, device=input_ids.device).reshape(1, -1)
-        return OutputAndCache(generated_len, propose_tokens, None, None)
+                [input_ids, next_token_id.reshape(1, 1)], dim=-1)
+        propose_tokens = torch.cat(propose_tokens, dim=-1)
+        propose_distributions = torch.cat(propose_distributions, dim=0)
+        return OutputAndCache(generated_len, propose_tokens,
+                              None, propose_distributions,
+                              None)
 
     def adjust_input_impl(self, accept_token_ids: torch.Tensor,
                           proposer_input: InputAndCache,
@@ -128,14 +142,15 @@ class SmallModelKVCacheProposer(Proposer):
                                  past_key_values=past_key_values,
                                  use_cache=True)
             past_key_values = outputs.past_key_values
-            next_token_logits = outputs.logits[:, -1, :] # next_token_logits has shape [1, vocab_size]
+            # next_token_logits has shape [1, vocab_size]
+            next_token_logits = outputs.logits[:, -1, :]
             distribution = sample_method(next_token_logits)
             next_token_id = torch.multinomial(distribution, num_samples=1)
-            
+
             propose_logits.append(next_token_logits)
             propose_distributions.append(distribution)
             propose_tokens.append(next_token_id)
-            
+
             if next_token_id.item() == self.tokenizer.eos_token_id:
                 generated_len = i + 1
                 # print(f"[Info] Stop at {generated_len} because of eos")
@@ -153,9 +168,17 @@ class SmallModelKVCacheProposer(Proposer):
                           proposer_output: OutputAndCache) -> InputAndCache:
         proposer_input_ids = accept_token_ids.tile(
             proposer_input.input_ids.shape[0], 1)
-        total_generated_len = proposer_output.past_key_values[0][0].shape[2] + 1
-        proposer_key_values = crop_past_key_values(proposer_output.past_key_values,
-                                                   max_len=total_generated_len - proposer_output.generated_len)
+
+        # mqa
+        if str(self.model.__class__.__name__) in ["GPTBigCodeForCausalLM"]:
+            total_generated_len = proposer_output.past_key_values[0].shape[-2] + 1
+            proposer_key_values = crop_mqa_past_key_values(proposer_output.past_key_values,
+                                                           max_len=total_generated_len - proposer_output.generated_len)
+        else:  # mha
+            total_generated_len = proposer_output.past_key_values[0][0].shape[2] + 1
+            proposer_key_values = crop_past_key_values(proposer_output.past_key_values,
+                                                       max_len=total_generated_len - proposer_output.generated_len)
+
         proposer_attn_masks = torch.cat([proposer_input.attention_mask,
                                          torch.ones_like(proposer_input_ids, dtype=torch.long)], dim=-1)
         return InputAndCache(proposer_input_ids, proposer_attn_masks, proposer_key_values)
