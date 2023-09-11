@@ -1,36 +1,43 @@
 from datasets import load_dataset
 import json
+from transformers import AutoTokenizer
 import random
 import os
 
-data_name = "mbpp"
-dataset = load_dataset(data_name)
+# dataset = load_dataset("bigcode/starcoderdata", 
+#                        data_dir="rust", 
+#                        split="train")
 
-# Access different splits
-dataset["train"].to_json(f"{data_name}_train_raw.json")
-dataset["test"].to_json(f"{data_name}_eval_raw.json")
-dataset["validation"].to_json(f"{data_name}_validation_raw.json")
+# dataset.to_json(f"rustcode_train_raw.json")
 
 def load_transform(filename, prefix):
     code_prompt = " Please only include Python code in your answer, don't include any explanation."
+    tokenizer = AutoTokenizer.from_pretrained("/data/starcoderbase/")
     def transform(i, case):
         case["id"] = f"{prefix}_identity_{i}"
+        input_ids = tokenizer(case['content'])["input_ids"]
+        if len(input_ids) < 200:
+            return None
+        
+        prompt = tokenizer.decode(input_ids[:200])
+        label = tokenizer.decode(input_ids[200:])
+    
         if prefix == "train":
             case["conversation"] = [
                 {
                     "role" : "user",
-                    "content" :  case['text'] + code_prompt
+                    "content" :  prompt
                 },
                 {
                     "role" : "assistant",
-                    "content" : " ".join(case['code'])
+                    "content" : label
                 }
             ]
         elif prefix == "eval":
             case["conversation"] = [
                 {
                     "role" : "user",
-                    "content" : case['text'] + code_prompt
+                    "content" : prompt
                 }
             ]
         else:
@@ -41,27 +48,29 @@ def load_transform(filename, prefix):
     with open(filename, "r") as f:
         raw_data = list(f)
 
+        i = 0
         cases = []
         for case in raw_data:
             case = json.loads(case)
             cases.append(case)
+            i += 1
+            if i == 20000:
+                break
     cases = [transform(i, case) for i, case in enumerate(cases)]
+    cases = [c for c in cases if c is not None]
     return cases
 
-train1_cases = load_transform(f"{data_name}_train_raw.json", "train")
-train2_cases = load_transform(f"{data_name}_eval_raw.json", "eval")
-train_cases = train1_cases + train2_cases
-eval_cases = load_transform(f"{data_name}_validation_raw.json", "eval")
-# sample 200 cases only
-random.shuffle(eval_cases)
-eval_cases = eval_cases[:200]
+
+all_cases = load_transform(f"rustcode_train_raw.json", "train")
+random.shuffle(all_cases)
+eval_cases = all_cases[:200]
+train_cases = all_cases[200:]
 print(len(train_cases), len(eval_cases))
 
-with open(f'{data_name}_train.json', 'w') as f:
+with open(f'rustcode_train.json', 'w') as f:
     json.dump(train_cases, f)
         
-with open(f'{data_name}_eval.json', 'w') as f:
+with open(f'rustcode_eval.json', 'w') as f:
     json.dump(eval_cases, f)
 
-os.remove(f"{data_name}_train_raw.json")
-os.remove(f"{data_name}_eval_raw.json")
+os.remove(f"rustcode_train_raw.json")

@@ -96,9 +96,11 @@ def preprocess(
     model: str,
     do_eval: bool
 ) -> Dict:
-    if "llama" in model.lower():
+    if ("llama" in model.lower()) or ("starcoder" in model.lower()):
         # does not support multi-round conversation for llama
         # print(sources)
+        if tokenizer.model_max_length > 1024 * 16:
+            tokenizer.model_max_length = 1024 * 16
         if do_eval:
             assert len(sources) == 1
             conversations = [sources[0][0]["content"]]
@@ -277,11 +279,19 @@ def train():
         model_args.teacher_model_path,
         cache_dir=training_args.cache_dir,
     )
-    teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_args.teacher_model_path,
-        config=teacher_config
-    )
+    if "starcoder" in model_args.teacher_model_path:
+        teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
+            model_args.teacher_model_path,
+            config=teacher_config,
+            torch_dtype=torch.bfloat16
+        )
+    else:
+        teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
+            model_args.teacher_model_path,
+            config=teacher_config
+        )
     teacher_model.cuda()
+    print(f"Teacher Model memory: {teacher_model.get_memory_footprint() / 1024 / 1024} MB")
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.teacher_model_path,

@@ -37,36 +37,39 @@ def main(student_model_path,
 
     i = 0
     correctness = 0
-    stats = torch.zeros(32000, dtype=torch.long, device='cuda')
+    vocab_size = len(tokenizer.get_vocab())
+    stats = torch.zeros(vocab_size, dtype=torch.long, device='cuda')
     alpha, sample_steps = 0, 0
     for d in eval_dataset:
         max_tokens = 128
         input_ids = d["input_ids"].reshape(1, -1).cuda()
         output = generator.generate(input_ids, max_tokens, temperature=0.01)
         correct_tokens = output.correct_tokens.squeeze(0)
-        print(5097 in correct_tokens.tolist())
         stats[correct_tokens] = stats[correct_tokens] + 1
         if i % 10 == 0:
             print(f"{i}/{len(eval_dataset)}")
-        print("===================================")
-        print(tokenizer.decode(d["input_ids"]))
-        print(output.output)
-        print(correct_tokens.shape)
-        print(output.propose_steps, correct_tokens.shape[-1]/output.propose_steps)
-        print("===================================")
+        # print("===================================")
+        # print("Ref")
+        # ref_generated = teacher_model.generate(input_ids, max_new_tokens=max_tokens)[0][input_ids.shape[-1]:]
+        # print(tokenizer.decode(ref_generated), end="\n\n")
+        # print("--")
+        # print(output.output[0])
+        # print(correct_tokens.shape)
+        # print(output.propose_steps, correct_tokens.shape[-1]/output.propose_steps)
+        # print("===================================")
         correctness += output.correct_tokens.shape[-1]/output.propose_steps
         alpha += output.alpha_sum
         sample_steps += output.sample_steps
         i += 1
-        if i == 10:
-            break
+        # if i == 10:
+        #     break
     print(i, correctness / i, alpha.item() / sample_steps)
 
-    with open('output/ckpt500-spider.pkl', 'wb') as f:
-        pickle.dump(stats, f)
+    # with open('output/ckpt500-spider.pkl', 'wb') as f:
+    #     pickle.dump(stats, f)
 
 def model_generate(model_path, data_path):
-    tokenizer = AutoTokenizer.from_pretrained("/data/vicuna-7b-v1.3/")
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
     tokenizer.pad_token = tokenizer.unk_token
     model = load_model(model_path)
     param_sum = 0
@@ -86,6 +89,7 @@ def model_generate(model_path, data_path):
                                    max_new_tokens=max_tokens)[
             0][input_ids.shape[-1]:]
         print(f"Prompt: {tokenizer.decode(input_ids[0])}")
+        print("--")
         print(f"Answer: {tokenizer.decode(generated)}")
         print("----------------------------------")
         i += 1
