@@ -14,27 +14,22 @@ class SampleSource(Enum):
     Mix = 3
 
 
-class TrainMode(Enum):
-    Online = 1
-    Offline = 2
-
-
 eval_cnt = 0
 
-UPDATE_INTERVAL = 4
+UPDATE_INTERVAL = 1
 
 
 class DistillTrainer(Trainer):
-    def __init__(self, teacher_model, propose_num, mode, *args, **kwargs):
+    def __init__(self, teacher_model, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        args = kwargs["args"]
         self.teacher_model = teacher_model
         self.loss_model = "soft_only"
         self.generator = Generator(
-            self.model, self.teacher_model, self.tokenizer, propose_num
+            self.model, self.teacher_model, self.tokenizer, args.max_propose_num
         )
         # online related params
-        self.online_update_step = 0
-        self.mode = mode
+        self.mode = args.mode
         self.buffer = []
 
     def soft_cross_entropy(self, predicts, targets, padding_mask):
@@ -91,9 +86,9 @@ class DistillTrainer(Trainer):
         ).logits
 
     def training_step(self, model, inputs):
-        if self.mode == TrainMode.Offline:
+        if self.mode == "offline":
             return self.offline_training_step(model, inputs)
-        elif self.mode == TrainMode.Online:
+        elif self.mode == "online":
             return self.online_training_step(model, inputs)
         else:
             raise ValueError()
@@ -111,35 +106,38 @@ class DistillTrainer(Trainer):
         # use speculative decoding to generate tokens
         output = self.generator.generate(inputs["input_ids"], max_new_tokens)
 
-        if self.online_update_step >= UPDATE_INTERVAL:
+        if len(self.buffer) >= UPDATE_INTERVAL:
+            self.model.train() # switch back to training mode
+            
             input_ids = pad_to_2d([x[0] for x in self.buffer], 0)
             student_logits = self.get_logits(
                 model, input_ids, torch.ones_like(input_ids)
             )
             # generate teacher logits as the label
             # TODO: we can avoid this forward by getting logits during speculative decoding
-            student_logits = self.get_logits(
-                self.teacher_model,
-                output.generated_ids,
-                torch.ones_like(output.generated_ids),
-            )
-            teacher_logits = self.get_logits(
-                self.teacher_model, input_ids, torch.ones_like(input_ids)
-            )
+            with torch.no_grad():
+                teacher_logits = self.get_logits(
+                    self.teacher_model, 
+                    input_ids, 
+                    torch.ones_like(input_ids)
+                )
 
             # only compute loss at wrong predictions
-            mask = torch.ones_like(input_ids)
+            mask = torch.ones_like(input_ids, dtype=torch.bool)
             for i, data in enumerate(self.buffer):
-                cur_wrong_token_ids = data[2]
-                mask[i, cur_wrong_token_ids] = 0
+                cur_wrong_token_ids = data[1]
+                mask[i, cur_wrong_token_ids] = False
 
-            loss = self.soft_cross_entropy(student_logits, teacher_logits, mask)
-            loss.backward()  
+            loss = self.soft_cross_entropy(
+                student_logits, teacher_logits, mask)
+            loss.backward()
             self.buffer = []
             return loss.detach()
         else:
-            self.buffer.append((output.generated_ids, output.wrong_token_ids))
-            return None
+            token_ids = torch.cat([inputs["input_ids"], output.generated_ids], dim=-1)
+            wrong_token_ids = [inputs["input_ids"].shape[-1] + t for t in output.wrong_token_ids]
+            self.buffer.append((token_ids, wrong_token_ids))
+            return torch.tensor(-1)
 
     def offline_training_step(self, model, inputs):
         max_new_tokens = 128
@@ -181,7 +179,7 @@ class DistillTrainer(Trainer):
 
         # get student/teacher logits
         student_logits = self.get_logits(model, generated_ids, attention_mask)[
-            :, -gen_len - 1 : -1, :
+            :, -gen_len - 1: -1, :
         ]
         with torch.no_grad():
             if generated_logits is not None:
@@ -189,10 +187,11 @@ class DistillTrainer(Trainer):
             else:
                 teacher_logits = self.get_logits(
                     self.teacher_model, generated_ids, attention_mask
-                )[:, -gen_len - 1 : -1, :]
+                )[:, -gen_len - 1: -1, :]
 
         # calculate loss with kl divergence
-        output_mask = generated_ids[:, -gen_len:] == self.tokenizer.pad_token_id
+        output_mask = generated_ids[:, -
+                                    gen_len:] == self.tokenizer.pad_token_id
         if kl_method == "teacher_student":
             loss = self.soft_cross_entropy(
                 student_logits / temperature, teacher_logits / temperature, output_mask
@@ -263,7 +262,8 @@ class DistillTrainerCallback(TrainerCallback):
         if self.correct_cnt > 0:
             with open("out", "a") as f:
                 f.write(f"[{eval_cnt}] {self.correct_cnt}/{self.propose_cnt}\n")
-            wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+            wandb.log(
+                {"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
             wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
 
         eval_cnt += 1

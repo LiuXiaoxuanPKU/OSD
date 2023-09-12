@@ -106,6 +106,10 @@ class Generator:
 
     @torch.inference_mode()
     def generate(self, input_ids, max_tokens, temperature=0.01):
+        # make sure all models are in the inference mode
+        self.model.eval()
+        self.proposer.model.eval()
+        
         def sample_method(logits):
             return torch.softmax(logits / temperature, dim=-1)
 
@@ -152,7 +156,7 @@ class Generator:
                 generated_tokens = torch.cat(
                     [generated_tokens, accept_token_ids], dim=-1)
             generated_token_cnt += accept_token_ids.shape[1]
-            wrong_token_ids.append(generated_token_cnt)
+            wrong_token_ids.append(generated_token_cnt - 1)
 
             if correct_tokens is None:
                 correct_tokens = accept_token_ids[:, :-1]

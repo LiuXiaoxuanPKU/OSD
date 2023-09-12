@@ -70,6 +70,12 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "gamma, number of tokens the student model proposes for each step"
         }
     )
+    mode: str = field(
+        default="offline",
+        metadata={
+            "help": "online mode or offline mode"
+        }
+    )
 
 
 local_rank = None
@@ -167,7 +173,7 @@ def preprocess(
                 max_length=tokenizer.model_max_length,
                 truncation=True,
             ).input_ids
-        
+
         targets = input_ids.clone()
         return dict(
             input_ids=input_ids,
@@ -291,7 +297,8 @@ def train():
             config=teacher_config
         )
     teacher_model.cuda()
-    print(f"Teacher Model memory: {teacher_model.get_memory_footprint() / 1024 / 1024} MB")
+    print(
+        f"Teacher Model memory: {teacher_model.get_memory_footprint() / 1024 / 1024} MB")
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.teacher_model_path,
@@ -308,8 +315,8 @@ def train():
                                               model=model_args.teacher_model_path)
 
     trainer = DistillTrainer(
-        model=model, tokenizer=tokenizer, 
-        teacher_model=teacher_model, propose_num=training_args.max_propose_num,
+        model=model, tokenizer=tokenizer,
+        teacher_model=teacher_model,
         args=training_args, **data_module
     )
     trainer.add_callback(DistillTrainerCallback)
