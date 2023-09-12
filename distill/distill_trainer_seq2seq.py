@@ -3,6 +3,7 @@ from transformers import Trainer, Seq2SeqTrainer, TrainerCallback
 from transformers.trainer_pt_utils import LabelSmoother
 import wandb
 from specInfer.generator import Generator
+from specInfer.generator_seq2seq import Seq2SeqGenerator
 from enum import Enum
 import random
 
@@ -22,7 +23,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         self.teacher_model = teacher_model
         self.loss_model = "soft_only"
         self.eval_cnt = 0
-        self.generator = Generator(self.model,
+        self.generator = Seq2SeqGenerator(self.model,
                                    self.teacher_model,
                                    self.tokenizer,
                                    propose_num)
@@ -80,10 +81,10 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 logits = None
             return outputs["sequences"], logits
 
-    def get_logits(self, model, input_ids, decoder_input_ids, attention_mask):
+    def get_logits(self, model, input_ids, labels, attention_mask):
         return model(
             input_ids=input_ids,
-            decoder_input_ids=decoder_input_ids,
+            labels=labels,
             attention_mask=attention_mask,
         ).logits
     
@@ -119,37 +120,32 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         label_len = inputs['labels'].shape[1]
         # hard-coded embedding index fix
         input_labels = inputs['labels'].clone()
-        input_labels[input_labels == -100] = 0
-        generated_decoder_ids, generated_decoder_logits = self.get_generated_ids(sample_model,
-                                                                 self.tokenizer,
-                                                                 input_labels,
-                                                                 max_new_decoder_tokens,
-                                                                 require_logits)
-        bsz_label, gen_label_len = generated_decoder_ids.shape
-        if gen_seq_len >= gen_label_len:
+
+        bsz_label, input_label_len = input_labels.shape
+        if gen_seq_len >= input_label_len:
             # pad label ids
-            padding_len = gen_seq_len - gen_label_len
-            generated_decoder_ids = torch.cat([generated_decoder_ids,
+            padding_len = gen_seq_len - input_label_len
+            input_labels = torch.cat([input_labels,
                                     torch.ones((bsz, padding_len), device='cuda', dtype=torch.long)], dim=1)
-            generated_decoder_ids[:, -padding_len:] = self.tokenizer.pad_token_id
+            input_labels[:, -padding_len:] = self.tokenizer.pad_token_id
             
             attention_mask = inputs['attention_mask'][:, :gen_seq_len]
         else:
             # pad generated id
-            padding_len = gen_label_len - gen_seq_len
+            padding_len = input_label_len - gen_seq_len
             generated_ids = torch.cat([generated_ids,
                                     torch.ones((bsz, padding_len), device='cuda', dtype=torch.long)], dim=1)
             generated_ids[:, -padding_len:] = self.tokenizer.pad_token_id
 
-            attention_mask = inputs['attention_mask'][:, :gen_label_len]
+            attention_mask = inputs['attention_mask'][:, :input_label_len]
 
         # get student/teacher logits
-        student_logits = self.get_logits(model, generated_ids, generated_decoder_ids, attention_mask)[:, :, :]
+        student_logits = self.get_logits(model, generated_ids, input_labels, attention_mask)[:, :, :]
         with torch.no_grad():
             if generated_logits is not None:
                 teacher_logits = generated_logits
             else:
-                teacher_logits = self.get_logits(self.teacher_model, generated_ids, generated_decoder_ids, attention_mask)[
+                teacher_logits = self.get_logits(self.teacher_model, generated_ids, input_labels, attention_mask)[
                     :, :, :]
 
         # calculate loss with kl divergence
@@ -189,7 +185,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
 
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output = self.generator.generate(inputs["input_ids"], 200)
+        output = self.generator.generate(inputs["input_ids"], input["labels"], 200)
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, DistillTrainerCallback):
