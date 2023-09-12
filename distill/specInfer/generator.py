@@ -14,10 +14,12 @@ from typing import List
 @dataclass
 class GeneratorOutput:
     output: List[str]
+    generated_ids: torch.tensor
     correct_tokens: torch.tensor
     propose_steps: int
     sample_steps: int
     alpha_sum: float
+    wrong_token_ids: List[int]
 
 
 class Generator:
@@ -109,6 +111,7 @@ class Generator:
 
         generated_token_cnt = 0
         generated_tokens = None
+        wrong_token_ids = []
         proposer_input = InputAndCache(
             input_ids, torch.ones_like(input_ids), None)
         verifier_input = InputAndCache(
@@ -149,6 +152,8 @@ class Generator:
                 generated_tokens = torch.cat(
                     [generated_tokens, accept_token_ids], dim=-1)
             generated_token_cnt += accept_token_ids.shape[1]
+            wrong_token_ids.append(generated_token_cnt)
+
             if correct_tokens is None:
                 correct_tokens = accept_token_ids[:, :-1]
             else:
@@ -171,9 +176,12 @@ class Generator:
         self.verifier.print_time()
         self.print_time()
         return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens),
+                               generated_tokens,
                                correct_tokens,
                                propose_steps,
-                               sample_steps, alpha)
+                               sample_steps, 
+                               alpha,
+                               wrong_token_ids)
 
     def print_time(self):
         if self.benchmark_time:
