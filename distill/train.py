@@ -76,6 +76,18 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "online mode or offline mode"
         }
     )
+    online_eval_interval: int = field(
+        default=10,
+        metadata={
+            "help": "evaluation interval for online training"
+        }
+    )
+    online_update_interval: int = field(
+        default=1,
+        metadata={
+            "help": "parameter update interval for online training"
+        }
+    )
 
 
 local_rank = None
