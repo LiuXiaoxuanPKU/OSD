@@ -20,6 +20,13 @@ import math
 import pathlib
 from typing import Dict, Optional, Sequence
 
+import wandb
+
+import random
+
+import os
+
+import datasets
 import evaluate
 
 import numpy as np
@@ -51,6 +58,9 @@ class ModelArguments:
 class DataArguments:
     dataset_name: str = field(
         default=None, metadata={"help": "Dataset's name."}
+    )
+    dataset_config_name: Optional[str] = field(
+        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
     metric: str = field(
         default='rouge', metadata={"help": "Metric to use for evaluation."}
@@ -157,6 +167,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
 def train():
     global local_rank
+    
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, Seq2SeqTrainingArguments)
     )
@@ -203,16 +214,33 @@ def train():
     tokenizer.pad_token = tokenizer.unk_token
 
     # Load data
+    # use only 1/8 training and testing data
     if data_args.dataset_name == 'xsum':
-        train_dataset = Xsum_Dataset(split = 'train', source_length=data_args.source_max_length, target_length=data_args.train_target_max_length)
-        eval_dataset = Xsum_Dataset(split='validation', source_length=data_args.source_max_length, target_length=data_args.val_target_max_length)
-        predict_dataset = Xsum_Dataset(split='test', source_length=data_args.source_max_length, target_length=data_args.test_target_max_length)
+        train_dataset = Xsum_Dataset(split = 'train', source_length=data_args.source_max_length, target_length=data_args.train_target_max_length).dataset
+        eval_dataset = Xsum_Dataset(split='validation', source_length=data_args.source_max_length, target_length=data_args.val_target_max_length).dataset
+        predict_dataset = Xsum_Dataset(split='test', source_length=data_args.source_max_length, target_length=data_args.test_target_max_length).dataset
     elif data_args.dataset_name == 'wikihow':
-        train_dataset = Wikihow_Dataset(split = 'train', source_length=data_args.source_max_length, target_length=data_args.train_target_max_length)
-        eval_dataset = Wikihow_Dataset(split='validation', source_length=data_args.source_max_length, target_length=data_args.val_target_max_length)
-        predict_dataset = Wikihow_Dataset(split='test', source_length=data_args.source_max_length, target_length=data_args.test_target_max_length)
+        train_dataset = Wikihow_Dataset(split = 'train', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.train_target_max_length)
+        eval_dataset = Wikihow_Dataset(split='validation', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.val_target_max_length)
+        predict_dataset = Wikihow_Dataset(split='test', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.test_target_max_length)
     else:
-        raise NotImplementedError()
+        raw_datasets = datasets.load_dataset(
+            data_args.dataset_name,
+            data_args.dataset_config_name,
+        )
+        train_dataset = raw_datasets["train"]
+        eval_dataset = raw_datasets["validation"]
+        predict_dataset = raw_datasets["test"]
+
+    # data partitioning
+    train_random_indices = random.sample(range(len(train_dataset)), len(train_dataset)//8)
+    train_dataset = datasets.Dataset.from_dict(train_dataset[train_random_indices])
+
+    eval_random_indices = random.sample(range(len(eval_dataset)), 200)
+    eval_dataset = datasets.Dataset.from_dict(eval_dataset[eval_random_indices])
+
+    predict_random_indices = random.sample(range(len(predict_dataset)), len(predict_dataset)//8)
+    predict_dataset = datasets.Dataset.from_dict(predict_dataset[predict_random_indices])
 
     # ---------------------------------------- Data preprocessing -----------------------------------------------
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
@@ -249,11 +277,11 @@ def train():
     # Preprocessing the datasets.
     # We need to tokenize inputs and targets.
     if training_args.do_train:
-        column_names = train_dataset.dataset.column_names
+        column_names = train_dataset.column_names
     elif training_args.do_eval:
-        column_names = eval_dataset.dataset.column_names
+        column_names = eval_dataset.column_names
     elif training_args.do_predict:
-        column_names = predict_dataset.dataset.column_names
+        column_names = predict_dataset.column_names
     else:
         logger.info("There is nothing to do. Please pass `do_train`, `do_eval` and/or `do_predict`.")
         return
@@ -293,7 +321,6 @@ def train():
         return model_inputs
 
     if training_args.do_train:
-        train_dataset = train_dataset.dataset
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
@@ -307,7 +334,6 @@ def train():
 
     if training_args.do_eval:
         max_target_length = data_args.val_target_max_length
-        eval_dataset = eval_dataset.dataset
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
@@ -321,7 +347,6 @@ def train():
 
     if training_args.do_predict:
         max_target_length = data_args.test_target_target_max_length
-        predict_dataset = test_dataset.dataset
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
             predict_dataset = predict_dataset.select(range(max_predict_samples))

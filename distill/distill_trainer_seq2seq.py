@@ -141,9 +141,6 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         # get student/teacher logits
         student_logits = self.get_logits(model, generated_ids, input_labels, attention_mask)
         with torch.no_grad():
-            if generated_logits is not None:
-                teacher_logits = generated_logits
-            else:
                 teacher_logits = self.get_logits(self.teacher_model, generated_ids, input_labels, attention_mask)
 
         # calculate loss with kl divergence
