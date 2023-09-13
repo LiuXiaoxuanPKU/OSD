@@ -172,6 +172,14 @@ class DistillTrainer(Trainer):
         else:
             return torch.tensor(-1)
 
+    def log(self, logs):
+        # Remove the 'loss' entry with value 0 before calling the superclass method
+        if 'loss' in logs and logs['loss'] == -1:
+            del logs['loss']
+        
+        # Call the original `log` method of the `Trainer` class
+        super().log(logs)
+        
     def offline_training_step(self, model, inputs):
         max_new_tokens = 128
         temperature = 1

@@ -4,7 +4,7 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --data_path data/spider_train.json \
     --max_propose_num 5 \
     --bf16 True \
-    --output_dir /data/online \
+    --output_dir /data/spider_online_interval8 \
     --num_train_epochs 3 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
@@ -17,13 +17,13 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --weight_decay 0. \
     --warmup_ratio 0.1 \
     --lr_scheduler_type "cosine" \
-    --logging_steps 1 \
     --tf32 True \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name spider_online \
+    --run_name spider_online_interval8 \
     --mode online \
     --online_eval_interval 10 \
-    --online_update_interval 4 \
-    --logging_steps 4
+    --online_update_interval 8 \
+    --logging_steps 1 \
+    --logging_nan_inf_filter true
