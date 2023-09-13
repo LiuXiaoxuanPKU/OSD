@@ -233,13 +233,13 @@ def train():
         predict_dataset = raw_datasets["test"]
 
     # data partitioning
-    train_random_indices = random.sample(range(len(train_dataset)), len(train_dataset)//8)
+    train_random_indices = random.sample(range(len(train_dataset)))
     train_dataset = datasets.Dataset.from_dict(train_dataset[train_random_indices])
 
     eval_random_indices = random.sample(range(len(eval_dataset)), 200)
     eval_dataset = datasets.Dataset.from_dict(eval_dataset[eval_random_indices])
 
-    predict_random_indices = random.sample(range(len(predict_dataset)), len(predict_dataset)//8)
+    predict_random_indices = random.sample(range(len(predict_dataset)), 200)
     predict_dataset = datasets.Dataset.from_dict(predict_dataset[predict_random_indices])
 
     # ---------------------------------------- Data preprocessing -----------------------------------------------
