@@ -68,7 +68,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                     max_new_tokens=max_new_tokens,
                     output_scores=require_logits,
                     return_dict_in_generate=True,
-                    pad_token_id=0,
+                    pad_token_id=tokenizer.pad_token_id,
                     bos_token_id=tokenizer.bos_token_id,
                     eos_token_id=tokenizer.eos_token_id
                 )
@@ -92,7 +92,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         max_new_tokens = 128
         max_new_decoder_tokens = 32
         temperature = 1
-        sample_source = SampleSource.Student
+        sample_source = SampleSource.Teacher
         kl_method = "teacher_student"
 
         # sample token ids
@@ -117,8 +117,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         # prepare inputs for getting logits
         bsz, gen_seq_len = generated_ids.shape
         
-        label_len = inputs['labels'].shape[1]
-        # hard-coded embedding index fix
+        label_len = inputs['labels'].shape[-1]
         input_labels = inputs['labels'].clone()
 
         bsz_label, input_label_len = input_labels.shape
@@ -140,16 +139,15 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             attention_mask = inputs['attention_mask'][:, :input_label_len]
 
         # get student/teacher logits
-        student_logits = self.get_logits(model, generated_ids, input_labels, attention_mask)[:, :, :]
+        student_logits = self.get_logits(model, generated_ids, input_labels, attention_mask)
         with torch.no_grad():
             if generated_logits is not None:
                 teacher_logits = generated_logits
             else:
-                teacher_logits = self.get_logits(self.teacher_model, generated_ids, input_labels, attention_mask)[
-                    :, :, :]
+                teacher_logits = self.get_logits(self.teacher_model, generated_ids, input_labels, attention_mask)
 
         # calculate loss with kl divergence
-        output_mask = generated_ids[:, :] == self.tokenizer.pad_token_id
+        output_mask = generated_ids == self.tokenizer.pad_token_id
         if kl_method == "teacher_student":
             loss = self.soft_cross_entropy(student_logits / temperature,
                                     teacher_logits / temperature,
@@ -162,7 +160,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             vocab_size = teacher_logits.shape[-1]
             teacher_logits = teacher_logits.reshape(-1, vocab_size)
             student_logits = student_logits.reshape(-1, vocab_size)
-            generated_ids = generated_ids[:, :].reshape(-1, 1)
+            generated_ids = generated_ids.reshape(-1, 1)
             with torch.no_grad():
                 log_ratio = (teacher_logits.log_softmax(-1).gather(-1, generated_ids) -
                             student_logits.log_softmax(-1).gather(-1, generated_ids))
