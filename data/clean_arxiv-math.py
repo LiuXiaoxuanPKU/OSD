@@ -10,25 +10,24 @@ dataset = load_dataset(data_name)
 dataset["train"].to_json(f"math_train_raw.json")
 
 def load_transform(filename, prefix):
-    SQL_prompt = "Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer. "
     def transform(i, case):
         case["id"] = f"{prefix}_identity_{i}"
         if prefix == "train":
             case["conversation"] = [
                 {
                     "role" : "user",
-                    "content" : SQL_prompt + case['question']
+                    "content" : case['question']
                 },
                 {
                     "role" : "assistant",
-                    "content" : " ".join(case['answer'])
+                    "content" : case['answer']
                 }
             ]
         elif prefix == "eval":
             case["conversation"] = [
                 {
                     "role" : "user",
-                    "content" : SQL_prompt + case['question']
+                    "content" :  case['question']
                 }
             ]
         else:
@@ -53,10 +52,10 @@ eval_cases = train_cases[:200]
 train_cases = train_cases[200:]
 print(len(train_cases), len(eval_cases))
 
-with open(f'math_train.json', 'w') as f:
+with open(f'arxiv-math_train.json', 'w') as f:
     json.dump(train_cases, f)
         
-with open(f'math_eval.json', 'w') as f:
+with open(f'arxiv-math_eval.json', 'w') as f:
     json.dump(eval_cases, f)
 
 os.remove(f"math_train_raw.json")

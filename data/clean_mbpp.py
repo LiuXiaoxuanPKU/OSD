@@ -23,7 +23,7 @@ def load_transform(filename, prefix):
                 },
                 {
                     "role" : "assistant",
-                    "content" : " ".join(case['code'])
+                    "content" : case['code']
                 }
             ]
         elif prefix == "eval":
