@@ -188,7 +188,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         output = self.generator.generate(inputs["input_ids"], 200)
         find = False
         for callback in self.callback_handler.callbacks:
-            if isinstance(callback, DistillTrainerCallback):
+            if isinstance(callback, Seq2SeqDistillTrainerCallback):
                 callback.correct_cnt += output.correct_tokens.shape[-1]
                 callback.propose_cnt += output.propose_steps
                 callback.alpha += output.alpha_sum
