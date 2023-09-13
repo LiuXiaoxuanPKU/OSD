@@ -19,23 +19,35 @@ class Seq2SeqGenerator(Generator):
                  tokenizer,
                  max_propose_num,
                  use_cache=True) -> None:
-        super().__init__(small_model,
-                 large_model,
-                 tokenizer,
-                 max_propose_num,
-                 use_cache)
+        self.model = large_model
+        self.tokenizer = tokenizer
+        # metrics
+        self.benchmark_time = False
+        self.generation_time = []
+
+        if use_cache:
+            self.proposer = Seq2SeqSmallModelKVCacheProposer(
+                small_model, tokenizer, self.benchmark_time)
+        else:
+            self.proposer = Seq2SeqSmallModelProposer(
+                small_model, tokenizer, self.benchmark_time)
+        self.verifier = Seq2SeqVerifier(large_model, tokenizer, self.benchmark_time)
+
+        # parameters
+        self.max_propose_num = max_propose_num
     
     @torch.inference_mode()
-    def generate(self, input_ids, labels, max_tokens, temperature=0.01):
+    def generate(self, input_ids, max_tokens, labels=None, temperature=0.01):
         def sample_method(logits):
             return torch.softmax(logits / temperature, dim=-1)
 
         generated_token_cnt = 0
         generated_tokens = None
+        # generate 1 dummy decoder input ids
         proposer_input = Seq2SeqInputAndCache(
-            input_ids, None, labels, torch.ones_like(input_ids), None)
+            input_ids, torch.Tensor([self.tokenizer.pad_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, torch.ones_like(input_ids), None)
         verifier_input = Seq2SeqInputAndCache(
-            input_ids, None, labels, torch.ones_like(input_ids), None)
+            input_ids, torch.Tensor([self.tokenizer.pad_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, torch.ones_like(input_ids), None)
 
         correct_tokens = None
         propose_steps = 0
@@ -52,7 +64,6 @@ class Seq2SeqGenerator(Generator):
             # prepare verifier input
             verifier_input = self.verifier.prepare_input(proposer_output,
                                                          verifier_input)
-
             # forward n tokens on the model in the a single run
             verifier_output = self.verifier.verify(
                 verifier_input,

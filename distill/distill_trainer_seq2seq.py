@@ -185,7 +185,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
 
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output = self.generator.generate(inputs["input_ids"], input["labels"], 200)
+        output = self.generator.generate(inputs["input_ids"], 200)
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, DistillTrainerCallback):

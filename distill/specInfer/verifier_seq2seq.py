@@ -3,7 +3,7 @@ import torch
 from typing import Tuple
 from specInfer.common import (Seq2SeqInputAndCache,
                               Seq2SeqOutputAndCache,
-                              crop_past_key_values,
+                              crop_past_key_values_seq2seq,
                               crop_mqa_past_key_values,
                               sychronize_time)
 from transformers import LogitsProcessorList
@@ -13,7 +13,16 @@ from .verifier import Verifier
 
 class Seq2SeqVerifier:
     def __init__(self, model, tokenizer, benchmark_time=False) -> None:
-        super().__init__(model, tokenizer, benchmark_time)
+        self.model = model
+        self.tokenizer = tokenizer
+        self.prompt_inputs = None
+        self.processor = LogitsProcessorList()
+
+        self.set_prompt_time = 0
+        self.verify_times = []
+        self.prepare_input_time = 0
+        self.adjust_input_time = 0
+        self.benchmark_time = benchmark_time
 
     def verify(self, input: Seq2SeqInputAndCache,
                propose_len: int,
@@ -21,11 +30,14 @@ class Seq2SeqVerifier:
         if self.benchmark_time:
             start = sychronize_time()
 
-        outputs = self.model(input_ids=input.input_ids,
-                             decoder_ids=input.decoder_input_ids,
-                             labels=input.labels,
-                             attention_mask=input.attention_mask,
-                             past_key_values=input.past_key_values)
+        input_ids = input.input_ids
+        decoder_input_ids = input.decoder_input_ids
+        labels = input.labels
+        attention_mask = input.attention_mask
+        past_key_values = input.past_key_values
+
+        outputs = self.model(input_ids=input_ids, decoder_input_ids=decoder_input_ids,
+                             past_key_values=past_key_values)
         next_token_scores = self.processor(input.decoder_input_ids, outputs.logits)
         generated_len = propose_len + 1
         logits = next_token_scores[:, -generated_len:, :]
@@ -75,7 +87,7 @@ class Seq2SeqVerifier:
         else:
             verifier_generated_len = verifier_output.past_key_values[0][0].shape[2] - (
                 verifier_output.generated_len - 1) + n_matches
-            verifier_key_values = crop_past_key_values(
+            verifier_key_values = crop_past_key_values_seq2seq(
                 verifier_output.past_key_values, verifier_generated_len - 1)
 
         verifier_attn_masks = verifier_input.attention_mask[:,
