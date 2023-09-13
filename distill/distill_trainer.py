@@ -26,7 +26,7 @@ class DistillTrainer(Trainer):
         self.generator = Generator(
             self.model, self.teacher_model, self.tokenizer, args.max_propose_num
         )
-        self.train_step = 0
+        self.train_step_cnt = 0
 
         # online related params
         self.mode = args.mode
@@ -34,7 +34,7 @@ class DistillTrainer(Trainer):
         self.online_update_interval = args.online_update_interval
         self.buffer = []
         self.alphas = []
-        self.propose_steps = []
+        self.sample_steps = []
 
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
@@ -90,7 +90,7 @@ class DistillTrainer(Trainer):
         ).logits
 
     def training_step(self, model, inputs):
-        self.training_step += 1
+        self.train_step_cnt += 1
         if self.mode == "offline":
             return self.offline_training_step(model, inputs)
         elif self.mode == "online":
@@ -108,23 +108,40 @@ class DistillTrainer(Trainer):
             self.args.gradient_accumulation_steps == 1
         ), f"Does not support grad_acc > 1 in online setting, grad_acc: {self.args.gradient_accumulation_steps}"
 
+        # remove any masking
+        input_ids =  inputs["input_ids"][inputs["attention_mask"]].unsqueeze(0)
         # use speculative decoding to generate tokens
-        output = self.generator.generate(inputs["input_ids"], max_new_tokens)
-
-        token_ids = torch.cat([inputs["input_ids"], output.generated_ids], dim=-1)
+        output = self.generator.generate(input_ids,
+                                         max_new_tokens)
+        
+        debug = False
+        if debug:
+            ref_generated = self.get_generated_ids(self.teacher_model, 
+                                                self.tokenizer, 
+                                                input_ids, 
+                                                torch.ones_like(input_ids), 
+                                                max_new_tokens, False)[0]
+            print(ref_generated)
+            print(self.tokenizer.batch_decode(ref_generated))
+            print(output.output)
+            print(output.alpha_sum)
+            print(output.sample_steps)
+            print("------")
+        
+        token_ids = torch.cat([input_ids, output.generated_ids], dim=-1)
         wrong_token_ids = [
-            inputs["input_ids"].shape[-1] + t for t in output.wrong_token_ids
+            input_ids.shape[-1] + t for t in output.wrong_token_ids
         ]
         self.buffer.append((token_ids, wrong_token_ids))
         self.alphas.append(output.alpha_sum)
-        self.propose_steps.append(output.propose_steps)
+        self.sample_steps.append(output.sample_steps)
 
-        if self.train_step % self.online_eval_interval == 0:
+        if self.train_step_cnt % self.online_eval_interval == 0:
             window_size = 100
             avg_alpha = (
                 sum(self.alphas[-window_size:])
                 * 1.0
-                / sum(self.propose_steps[-window_size:])
+                / sum(self.sample_steps[-window_size:])
             )
             wandb.log({"alpha": avg_alpha})
 
