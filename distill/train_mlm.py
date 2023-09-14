@@ -274,10 +274,6 @@ def train():
         and model.config.max_position_embeddings < data_args.source_max_length
     ):
         if model_args.resize_position_embeddings is None:
-            logger.warning(
-                "Increasing the model's number of position embedding vectors from"
-                f" {model.config.max_position_embeddings} to {data_args.msource_max_length}."
-            )
             model.resize_position_embeddings(data_args.msource_max_length)
         elif model_args.resize_position_embeddings:
             model.resize_position_embeddings(data_args.source_max_length)
@@ -300,7 +296,6 @@ def train():
     elif training_args.do_predict:
         column_names = predict_dataset.column_names
     else:
-        logger.info("There is nothing to do. Please pass `do_train`, `do_eval` and/or `do_predict`.")
         return
 
     # Get the column names for input/target.
@@ -452,7 +447,6 @@ def train():
     # Evaluation
     results = {}
     if training_args.do_eval:
-        logger.info("*** Evaluate ***")
         if isinstance(eval_dataset, dict):
             metrics = {}
             for eval_ds_name, eval_ds in eval_dataset.items():
@@ -468,7 +462,6 @@ def train():
 
     # Testing
     if training_args.do_predict:
-        logger.info("*** Predict ***")
 
         predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         metrics = predict_results.metrics
