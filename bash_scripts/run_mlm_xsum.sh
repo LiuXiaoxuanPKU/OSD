@@ -29,4 +29,4 @@ python3 -m torch.distributed.run --nproc_per_node=8 \
     --train_target_max_length 64 \
     --val_target_max_length 128 \
     --test_target_max_length 128 \
-    --output_dir /home/lanxiang/MIT/LLMs_and_TVM/specd/specNBCE-main/mlm_gsm8k 2>&1 | tee logs/train/gsm8k_t5_xl_to_small_trial_${trial}.log
+    --output_dir /home/lanxiang/MIT/LLMs_and_TVM/specd/specNBCE-main/mlm_xsum 2>&1 | tee logs/train/xsum_t5_xl_to_small_trial_${trial}.log
