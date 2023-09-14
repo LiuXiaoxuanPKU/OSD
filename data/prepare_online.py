@@ -21,7 +21,6 @@ def get_sample_idx(cases, i, total_size):
     
 def load_case(filename):
     cases = json.load(open(filename, "r"))
-    print(cases[0], end="\n\n")
     return cases
 
 def sample_cases(cases, total_size):
@@ -43,7 +42,10 @@ if __name__ == "__main__":
         run_cmd(f"python clean_{dataset}.py")
         cases.append(load_case(f"{dataset}_train.json"))
 
-    total_size = 10
+    total_size = 5000
     sampled = sample_cases(cases, total_size)
-    with open(f'mix.json', 'w') as f:
+    with open(f'smooth_mix.json', 'w') as f:
         json.dump(sampled, f)
+        
+    with open(f'sharp_mix.json', 'w') as f:
+        json.dump(cases[0][:total_size//2] + cases[1][:total_size//2], f)
