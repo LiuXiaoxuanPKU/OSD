@@ -1,17 +1,17 @@
 WANDB_PROJECT=specInfer python distill/train.py \
     --student_model_path eqhylxx/full-vicuna-160m \
-    --teacher_model_path /data/vicuna-7b-v1.5/ \
+    --teacher_model_path /rscratch/zhendong/lily/vicuna-7b-v1.3/ \
     --data_path data/spider_train.json \
     --eval_data_path data/spider_eval.json \
     --max_propose_num 5 \
     --bf16 True \
-    --output_dir /data/fullvicuna160M_vicuna7B_spider \
+    --output_dir student_kl_teacher_student_no-sample-grad_spider \
     --num_train_epochs 3 \
-    --per_device_train_batch_size 4 \
+    --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 8 \
     --evaluation_strategy "steps" \
-    --eval_steps 100 \
+    --eval_steps 10 \
     --save_strategy "steps" \
     --save_steps 100 \
     --save_total_limit 100 \
@@ -24,4 +24,5 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name fullvicuna160M_vicuna7B_spider
+    --report_to none \
+    --run_name fullvicuna160M_vicuna7B_spider_kl
