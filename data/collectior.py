@@ -9,8 +9,8 @@ LIMIT = 10 * 1000  # we handle at most LIMIT data
 
 class Collector:
     def __init__(self, name, *args, **kwargs) -> None:
-        self.name = name
-        self.dataset = load_dataset(self.name, *args, **kwargs)
+        self.dataset = load_dataset(name, *args, **kwargs)
+        self.name = name.replace("/", "_")
 
     def get_raw_filename(self, split, prefix):
         if prefix is not None:
@@ -20,7 +20,7 @@ class Collector:
 
     def get_output_filename(self, split, prefix):
         if prefix is not None:
-            return f"{prefix}_{self.name}_{split}_raw.json"
+            return f"{prefix}_{self.name}_{split}.json"
         else:
             return f"{self.name}_{split}.json"
 
@@ -42,7 +42,7 @@ class Collector:
                     break
         cases = [transform(i, case) for i, case in enumerate(cases)]
         cases = [c for c in cases if (c is not None) and ('conversation' in c) ]
-        case = {k: case[k] for k in ["id", "conversation"]}
+        cases = [{k: c[k] for k in ["id", "conversation"]} for c in cases]
         if size is not None:
             random.shuffle(cases)
             cases = cases[:size]
