@@ -70,6 +70,24 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "gamma, number of tokens the student model proposes for each step"
         }
     )
+    mode: str = field(
+        default="offline",
+        metadata={
+            "help": "online mode or offline mode"
+        }
+    )
+    online_eval_interval: int = field(
+        default=10,
+        metadata={
+            "help": "evaluation interval for online training"
+        }
+    )
+    online_update_interval: int = field(
+        default=1,
+        metadata={
+            "help": "parameter update interval for online training"
+        }
+    )
 
 
 local_rank = None
@@ -96,9 +114,11 @@ def preprocess(
     model: str,
     do_eval: bool
 ) -> Dict:
-    if "llama" in model.lower():
+    if ("llama" in model.lower()) or ("starcoder" in model.lower()):
         # does not support multi-round conversation for llama
         # print(sources)
+        if tokenizer.model_max_length > 1024 * 16:
+            tokenizer.model_max_length = 1024 * 16
         if do_eval:
             assert len(sources) == 1
             conversations = [sources[0][0]["content"]]
@@ -165,7 +185,7 @@ def preprocess(
                 max_length=tokenizer.model_max_length,
                 truncation=True,
             ).input_ids
-        
+
         targets = input_ids.clone()
         return dict(
             input_ids=input_ids,
@@ -277,11 +297,20 @@ def train():
         model_args.teacher_model_path,
         cache_dir=training_args.cache_dir,
     )
-    teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_args.teacher_model_path,
-        config=teacher_config
-    )
+    if "starcoder" in model_args.teacher_model_path:
+        teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
+            model_args.teacher_model_path,
+            config=teacher_config,
+            torch_dtype=torch.bfloat16
+        )
+    else:
+        teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
+            model_args.teacher_model_path,
+            config=teacher_config
+        )
     teacher_model.cuda()
+    print(
+        f"Teacher Model memory: {teacher_model.get_memory_footprint() / 1024 / 1024} MB")
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.teacher_model_path,
@@ -298,8 +327,8 @@ def train():
                                               model=model_args.teacher_model_path)
 
     trainer = DistillTrainer(
-        model=model, tokenizer=tokenizer, 
-        teacher_model=teacher_model, propose_num=training_args.max_propose_num,
+        model=model, tokenizer=tokenizer,
+        teacher_model=teacher_model,
         args=training_args, **data_module
     )
     trainer.add_callback(DistillTrainerCallback)

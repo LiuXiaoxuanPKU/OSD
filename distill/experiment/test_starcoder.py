@@ -16,6 +16,7 @@ model = AutoModelForCausalLM.from_pretrained(teacher_model_path,
                                          torch_dtype=torch.bfloat16)
 tokenizer = AutoTokenizer.from_pretrained(teacher_model_path)
 small_model = AutoModelForCausalLM.from_pretrained(student_model_path, device_map='auto', torch_dtype=torch.bfloat16)
+print(f"Model memory: {model.get_memory_footprint() / 1024 / 1024} MB")
 
 prompt = ("def print_hello_world():")
 max_new_tokens = 100

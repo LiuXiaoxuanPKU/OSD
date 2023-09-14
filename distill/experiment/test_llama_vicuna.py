@@ -9,7 +9,7 @@ from specInfer.common import sychronize_time
 from transformers import AutoTokenizer, LlamaForCausalLM
 import torch
 
-model_path = "/data/vicuna-13b-v1.5-16k"
+model_path = "/data/vicuna-7b-v1.3"
 model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 small_model = LlamaForCausalLM.from_pretrained("JackFram/llama-160m", device_map='auto', torch_dtype=torch.bfloat16)
@@ -25,7 +25,7 @@ ref_generated = model.generate(**inputs, max_new_tokens=max_new_tokens)[0][input
 start = sychronize_time()
 ref_generated = model.generate(**inputs, max_new_tokens=max_new_tokens)[0][inputs.input_ids.shape[-1]:]
 print(f"Reference Time: {sychronize_time() - start}")
-# print(tokenizer.decode(ref_generated), end="\n\n")
+print(tokenizer.decode(ref_generated), end="\n\n")
 
 
 ###################################### Speculative Decoding ##############################
@@ -36,4 +36,4 @@ output = generator.generate(inputs.input_ids, max_new_tokens)
 print(f"Speculative Decoding Time: {sychronize_time() - start}")
 print(f"alpha: {output.alpha_sum / output.sample_steps}, ",
       f"avg # of correct tokens: {output.correct_tokens.shape[-1] / output.propose_steps}")
-# print(output.output)
+print(output.output)

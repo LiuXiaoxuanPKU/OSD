@@ -31,7 +31,8 @@ class Verifier:
 
         outputs = self.model(input_ids=input.input_ids,
                              attention_mask=input.attention_mask,
-                             past_key_values=input.past_key_values)
+                             past_key_values=input.past_key_values,
+                             use_cache=True)
         next_token_scores = self.processor(input.input_ids, outputs.logits)
         generated_len = propose_len + 1
         logits = next_token_scores[:, -generated_len:, :]

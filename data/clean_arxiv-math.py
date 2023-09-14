@@ -2,31 +2,29 @@ from collectior import Collector
 
 
 def transform(i, case, need_label=False):
-    SQL_prompt = "Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer. "
     case["id"] = f"identity_{i}"
     if need_label:
         case["conversation"] = [
             {
                 "role": "user",
-                "content": SQL_prompt + case['question']
+                "content":  case['question']
             },
             {
                 "role": "assistant",
-                "content": " ".join(case['query_toks_no_value'])
+                "content": case['answer']
             }
         ]
     else:
         case["conversation"] = [
             {
                 "role": "user",
-                "content": SQL_prompt + case['question']
+                "content": case['question']
             }
         ]
     return case
 
 
 if __name__ == "__main__":
-    data_name = "spider"
+    data_name = "ArtifactAI/arxiv-math-instruct-50k"
     c = Collector(data_name)
     c.collect("train", transform)
-    c.collect("validation", transform, 200)
