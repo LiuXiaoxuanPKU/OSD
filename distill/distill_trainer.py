@@ -6,6 +6,7 @@ from specInfer.generator import Generator
 from specInfer.common import pad_to_2d
 from enum import Enum
 import random
+from torch.utils.data import DataLoader
 
 
 class SampleSource(Enum):
@@ -179,7 +180,20 @@ class DistillTrainer(Trainer):
         
         # Call the original `log` method of the `Trainer` class
         super().log(logs)
-        
+
+    def get_train_dataloader(self):
+        # Create custom DataLoader with shuffle set to False
+        shuffle = False
+        dataloader_params = {
+            "batch_size": self._train_batch_size,
+            "shuffle": shuffle,
+            "num_workers": self.args.dataloader_num_workers,
+            "pin_memory": self.args.dataloader_pin_memory,
+        }
+
+        return self.accelerator.prepare(DataLoader(self.train_dataset, **dataloader_params))
+        return DataLoader(self.train_dataset, shuffle=shuffle, batch_size=self.batch_size)
+          
     def offline_training_step(self, model, inputs):
         max_new_tokens = 128
         temperature = 1
