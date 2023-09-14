@@ -2,7 +2,7 @@ trial=$1              # trial number: 1, 2, 3, 4, 5, 6, ...
 
 export WANDB_RUN_GROUP=lily-falcon
 export WANDB_PROJECT=specInfer
-export CUDA_LAUNCH_BLOCKING=1
+#export CUDA_LAUNCH_BLOCKING=1
 
 python3 -m torch.distributed.run --nproc_per_node=8 \
     --master_port 20725 \
@@ -10,9 +10,8 @@ python3 -m torch.distributed.run --nproc_per_node=8 \
     --student_model_path google/t5-efficient-small  \
     --teacher_model_path google/t5-efficient-xl \
     --dataset_name cnn_dailymail \
-    --dataset_config_name 3.0.0 \
+    --dataset_config_name main \
     --do_train \
-    --do_eval \
     --num_train_epochs 3 \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 1 \
@@ -31,4 +30,6 @@ python3 -m torch.distributed.run --nproc_per_node=8 \
     --train_target_max_length 64 \
     --val_target_max_length 128 \
     --test_target_max_length 128 \
-    --output_dir /home/lanxiang/MIT/LLMs_and_TVM/specd/specNBCE-main/mlm_cnn_dailymail 2>&1 | tee logs/train/cnn_dailymail_t5_xl_to_small_trial_${trial}.log
+    --fsdp "no_shard" \
+    --fsdp_transformer_layer_cls_to_wrap 'T5Block' \
+    --output_dir /home/lanxiang/MIT/LLMs_and_TVM/specd/specNBCE-main/gsm_8k 2>&1 | tee logs/train/gsm_8k_t5_xl_to_small_trial_${trial}.log

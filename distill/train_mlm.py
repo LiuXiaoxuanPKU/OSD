@@ -134,6 +134,10 @@ class DataArguments:
     source_prefix: Optional[str] = field(
         default="", metadata={"help": "A prefix to add before every source text (useful for T5 models)."}
     )
+    fast_eval: bool = field(
+        default=True,
+        metadata={"help": "Fast evaluation strategy for logging."}
+    )
 
 
 @dataclass
@@ -228,19 +232,32 @@ def train():
             data_args.dataset_name,
             data_args.dataset_config_name,
         )
-        train_dataset = raw_datasets["train"]
-        eval_dataset = raw_datasets["validation"]
+
+        if training_args.do_train:
+            train_dataset = raw_datasets["train"]
+        if training_args.do_eval:
+            if not "validation" in raw_datasets.keys():
+                train_indices = range(len(raw_datasets["train"])//5 * 4)
+                eval_indices = range(len(raw_datasets["train"])//5 * 4, len(raw_datasets["train"]))
+                
+                train_dataset = datasets.Dataset.from_dict(raw_datasets["train"][train_indices])
+                eval_dataset = datasets.Dataset.from_dict(raw_datasets["train"][eval_indices])
+            
+            else:
+                eval_dataset = raw_datasets["validation"]
         predict_dataset = raw_datasets["test"]
 
     # data partitioning
-    #train_random_indices = random.sample(range(len(train_dataset)), len(train_dataset)//8)
-    #train_dataset = datasets.Dataset.from_dict(train_dataset[train_random_indices])
+    if data_args.fast_eval:
+    
+        #train_random_indices = tuple(random.sample(range(len(train_dataset)), len(train_dataset)))
+        #train_dataset = datasets.Dataset.from_dict(train_dataset[train_random_indices])
 
-    eval_random_indices = random.sample(range(len(eval_dataset)), 200)
-    eval_dataset = datasets.Dataset.from_dict(eval_dataset[eval_random_indices])
+        eval_random_indices = random.sample(range(len(eval_dataset)), len(eval_dataset)//10)
+        eval_dataset = datasets.Dataset.from_dict(eval_dataset[eval_random_indices])
 
-    predict_random_indices = random.sample(range(len(predict_dataset)), 200)
-    predict_dataset = datasets.Dataset.from_dict(predict_dataset[predict_random_indices])
+        predict_random_indices = random.sample(range(len(predict_dataset)), len(predict_dataset)//20)
+        predict_dataset = datasets.Dataset.from_dict(predict_dataset[predict_random_indices])
 
     # ---------------------------------------- Data preprocessing -----------------------------------------------
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch

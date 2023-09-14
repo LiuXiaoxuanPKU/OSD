@@ -205,12 +205,13 @@ class Seq2SeqDistillTrainerCallback(TrainerCallback):
         self.sample_steps = 0
 
     def on_evaluate(self, args, state, control, **kwargs):
-        print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
-        with open("out", "a") as f:
-            f.write(
-                f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
-        wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
-        wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
+        if args.local_rank == 0:
+            print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
+            with open("out", "a") as f:
+                f.write(
+                    f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
+            wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+            wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
 
         self.eval_step += 1
         self.correct_cnt = 0
