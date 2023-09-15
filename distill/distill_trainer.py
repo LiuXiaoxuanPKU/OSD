@@ -185,14 +185,13 @@ class DistillTrainer(Trainer):
         # Create custom DataLoader with shuffle set to False
         shuffle = False if self.mode == "online" else True
         dataloader_params = {
-            "batch_size": self._train_batch_size,
+            "batch_size": self.args.per_device_train_batch_size,
             "shuffle": shuffle,
             "num_workers": self.args.dataloader_num_workers,
             "pin_memory": self.args.dataloader_pin_memory,
         }
 
         return self.accelerator.prepare(DataLoader(self.train_dataset, **dataloader_params))
-        return DataLoader(self.train_dataset, shuffle=shuffle, batch_size=self.batch_size)
           
     def offline_training_step(self, model, inputs):
         max_new_tokens = 128
