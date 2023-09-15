@@ -2,30 +2,29 @@ from collectior import Collector
 
 
 def transform(i, case, need_label=False):
-    code_prompt = " Please only include Python code in your answer, don't include any explanation."
     case["id"] = f"identity_{i}"
     if need_label:
         case["conversation"] = [
             {
                 "role": "user",
-                "content":  case['text'] + code_prompt
+                "content":  case['instruction']
             },
             {
                 "role": "assistant",
-                "content": case['code']
+                "content": case['output']
             }
         ]
     else:
         case["conversation"] = [
             {
                 "role": "user",
-                "content": case['text']
+                "content":  case['instruction']
             }
         ]
     return case
 
 
 if __name__ == "__main__":
-    data_name = "mbpp"
+    data_name = "gbharti/finance-alpaca"
     c = Collector(data_name)
-    c.collect(["train", "validation", "test"], transform)
+    c.collect("train", transform, split_train=True)

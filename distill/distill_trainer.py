@@ -183,7 +183,7 @@ class DistillTrainer(Trainer):
 
     def get_train_dataloader(self):
         # Create custom DataLoader with shuffle set to False
-        shuffle = False
+        shuffle = False if self.mode == "online" else True
         dataloader_params = {
             "batch_size": self._train_batch_size,
             "shuffle": shuffle,
