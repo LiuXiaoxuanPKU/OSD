@@ -298,7 +298,14 @@ class DistillTrainer(Trainer):
 
         return None, None, None
 
+    def train(self, resume_from_checkpoint=None):
+        if self.mode == "offline":
+            # Evaluate the model before training
+            self.evaluate()
 
+        # Now start the actual training
+        super().train(resume_from_checkpoint)
+        
 class DistillTrainerCallback(TrainerCallback):
     def __init__(self) -> None:
         super().__init__()
