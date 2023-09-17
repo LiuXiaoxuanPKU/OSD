@@ -44,6 +44,44 @@ def is_correct(model_completion, gt_example):
     assert gt_answer != INVALID_ANS
     return extract_answer(model_completion) == gt_answer
 
+def preprocess_function_gsm8k(examples, tokenizer, args):
+    if args.debug:
+        inputs = examples["question"][:3]
+        targets = examples["answer"][:3]
+    else:
+        inputs = examples["question"]
+        targets = examples["answer"]
+    padding = 'max_length'
+    model_inputs = tokenizer(
+        inputs,
+        max_length=args.max_source_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+    # Tokenize targets with the `text_target` keyword argument
+    labels = tokenizer(
+        text_target=targets,
+        max_length=args.max_target_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt", 
+    )
+
+    if padding == "max_length":
+                labels["input_ids"] = [
+                    [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+                ]
+
+    model_inputs["labels"] = labels["input_ids"]
+    model_inputs["decoder_attention_mask"] = labels["attention_mask"]
+    return model_inputs
+
+def load_gsm8k(train_path: str = "./data/train.jsonl",
+              test_path: str = "./data/test.jsonl"):
+    train_data = datasets.Dataset.from_list(read_jsonl(train_path))
+    test_data = datasets.Dataset.from_list(read_jsonl(test_path))
+    return train_data, test_data
 
 class GSMDataset(torch.utils.data.Dataset):
     def __init__(self, tokenizer, examples, loss_on_prefix=True):
@@ -77,3 +115,83 @@ class GSMDataset(torch.utils.data.Dataset):
         tokens = torch.tensor(tokens)
         mask = torch.tensor(mask)
         return dict(input_ids=tokens, attention_mask=mask)
+
+# SPIDER dataset
+def preprocess_function_spider(examples, tokenizer, args, prefix="Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer."):
+    if args.debug:
+        inputs = examples["question"][:3]
+        targets = examples["query"][:3]
+    else:
+        inputs = examples["question"]
+        inputs = [prefix + inp for inp in inputs]
+        targets = examples["query"]
+    padding = 'max_length'
+    model_inputs = tokenizer(
+        inputs,
+        max_length=args.max_source_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+    # Tokenize targets with the `text_target` keyword argument
+    labels = tokenizer(
+        text_target=targets,
+        max_length=args.max_target_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    if padding == "max_length":
+                labels["input_ids"] = [
+                    [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+                ]
+
+    model_inputs["labels"] = labels["input_ids"]
+    model_inputs["decoder_attention_mask"] = labels["attention_mask"]
+    return model_inputs
+
+
+    # WMT16 EN-DE dataset
+def preprocess_function_ende(examples, tokenizer, args, prefix="translate English to German: "):
+    if args.debug:
+        example_text = examples['translation'][:2]
+        inputs = example_text['en']
+        targets = example_text["de"]
+    else:
+        all_text = examples['translation']
+        
+        inputs = []
+        targets = []
+        for excerpt in all_text:
+            en_text = prefix + excerpt['en']
+            de_text = excerpt['de']
+
+            inputs.append(en_text)
+            targets.append(de_text)
+            
+    padding = 'max_length'
+    model_inputs = tokenizer(
+        inputs,
+        max_length=args.max_source_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+    # Tokenize targets with the `text_target` keyword argument
+    labels = tokenizer(
+        text_target=targets,
+        max_length=args.max_target_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    if padding == "max_length":
+                labels["input_ids"] = [
+                    [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+                ]
+
+    model_inputs["labels"] = labels["input_ids"]
+    model_inputs["decoder_attention_mask"] = labels["attention_mask"]
+    return model_inputs

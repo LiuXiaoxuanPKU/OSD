@@ -37,7 +37,8 @@ class Seq2SeqVerifier:
         past_key_values = input.past_key_values
 
         outputs = self.model(input_ids=input_ids, decoder_input_ids=decoder_input_ids,
-                             past_key_values=past_key_values)
+                            attention_mask=attention_mask,
+                            past_key_values=past_key_values)
         next_token_scores = self.processor(input.decoder_input_ids, outputs.logits)
         generated_len = propose_len + 1
         logits = next_token_scores[:, -generated_len:, :]

@@ -27,8 +27,9 @@ class Wikihow_Dataset(torch.utils.data.Dataset):
     source = example['text']
     target = example['headline']
 
-    source_tuple = self.tokenizer.batch_encode_plus([source,], padding= 'max_length', max_length= self.source_length, truncation = True , return_tensors = "pt")
-    target_tuple = self.tokenizer.batch_encode_plus([target,], padding= 'max_length', max_length = self.target_length, truncation = True, return_tensors = "pt")
+    source_tuple = self.tokenizer.encode(source, padding= 'max_length', max_length= self.source_length, truncation = True , return_tensors = "pt")
+    print(source_tuple)
+    target_tuple = self.tokenizer.encode(target, padding= 'max_length', max_length = self.target_length, truncation = True, return_tensors = "pt")
 
     return (source_tuple, target_tuple)
 
@@ -82,3 +83,42 @@ class Xsum_Dataset(torch.utils.data.Dataset):
     target_mask = target_tuple["attention_mask"]
 
     return {"source": source, "source_mask": source_mask, "target": target, "target_mask": target_mask}
+  
+
+# summarization helper function
+def preprocess_function_generic(examples, tokenizer, args, prefix=""):
+  # remove pairs where at least one record is None
+
+  # Get the column names for input/target.
+  text_column = examples[0]
+  summary_column = examples[1]
+
+  # Temporarily set max_target_length for training.
+  max_target_length = args.train_target_max_length
+  # default set padding to "max_length"
+  padding = "max_length"
+
+  # remove pairs where at least one record is None
+
+  inputs, targets = [], []
+  for i in range(len(examples[text_column])):
+      if examples[text_column][i] and examples[summary_column][i]:
+          inputs.append(examples[text_column][i])
+          targets.append(examples[summary_column][i])
+
+  inputs = [prefix + inp for inp in inputs]
+  model_inputs = tokenizer(inputs, max_length=data_args.source_max_length, padding=padding, truncation=True, return_tensors="pt", )
+
+  # Tokenize targets with the `text_target` keyword argument
+  labels = tokenizer(text_target=targets, max_length=max_target_length, padding=padding, truncation=True, return_tensors="pt", )
+
+  # If we are padding here, replace all tokenizer.pad_token_id in the labels by -100 when we want to ignore
+  # padding in the loss.
+  if padding == "max_length" and args.ignore_pad_token_for_loss:
+      labels["input_ids"] = [
+          [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+      ]
+
+  model_inputs["labels"] = labels["input_ids"]
+  model_inputs["decoder_attention_mask"] = labels["attention_mask"]
+  return model_inputs

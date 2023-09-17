@@ -37,17 +37,18 @@ class Seq2SeqGenerator(Generator):
         self.max_propose_num = max_propose_num
     
     @torch.inference_mode()
-    def generate(self, input_ids, max_tokens, labels=None, temperature=0.01):
+    def generate(self, input_ids, attention_mask, max_tokens, labels=None, temperature=0.01):
         def sample_method(logits):
             return torch.softmax(logits / temperature, dim=-1)
 
         generated_token_cnt = 0
         generated_tokens = None
+        wrong_token_ids = []
         # generate 1 dummy decoder input ids
         proposer_input = Seq2SeqInputAndCache(
-            input_ids, torch.Tensor([self.tokenizer.pad_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, torch.ones_like(input_ids), None)
+            input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, attention_mask, None)
         verifier_input = Seq2SeqInputAndCache(
-            input_ids, torch.Tensor([self.tokenizer.pad_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, torch.ones_like(input_ids), None)
+            input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, attention_mask, None)
 
         correct_tokens = None
         propose_steps = 0
@@ -83,6 +84,8 @@ class Seq2SeqGenerator(Generator):
                 generated_tokens = torch.cat(
                     [generated_tokens, accept_token_ids], dim=-1)
             generated_token_cnt += accept_token_ids.shape[1]
+            wrong_token_ids.append(generated_token_cnt - 1)
+
             if correct_tokens is None:
                 correct_tokens = accept_token_ids[:, :-1]
             else:
@@ -103,8 +106,10 @@ class Seq2SeqGenerator(Generator):
 
         self.proposer.print_time()
         self.verifier.print_time()
-        self.print_time()
         return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens),
-                               correct_tokens,
-                               propose_steps,
-                               sample_steps, alpha)
+                                generated_tokens,
+                                correct_tokens,
+                                propose_steps,
+                                sample_steps, 
+                                alpha.item(),
+                                wrong_token_ids)

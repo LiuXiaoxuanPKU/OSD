@@ -39,9 +39,13 @@ from transformers.trainer_pt_utils import LabelSmoother
 from fastchat.conversation import SeparatorStyle
 from fastchat.model.model_adapter import get_conversation_template
 
+from functools import partial
+
 # local import
+from distill_trainer import DistillTrainer, DistillTrainerCallback
 from distill_trainer_seq2seq import Seq2SeqDistillTrainer, Seq2SeqDistillTrainerCallback
-from summarization_data import Xsum_Dataset, Wikihow_Dataset
+from summarization_data import Xsum_Dataset, Wikihow_Dataset, preprocess_function_generic
+from qa_data import load_gsm8k, preprocess_function_gsm8k, preprocess_function_spider, preprocess_function_ende
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
@@ -134,6 +138,10 @@ class DataArguments:
     source_prefix: Optional[str] = field(
         default="", metadata={"help": "A prefix to add before every source text (useful for T5 models)."}
     )
+    is_qa: bool = field(
+        default=False,
+        metadata={"help": "whether a QA dataset is used."}
+    )
     fast_eval: bool = field(
         default=True,
         metadata={"help": "Fast evaluation strategy for logging."}
@@ -148,6 +156,24 @@ class Seq2SeqTrainingArguments(transformers.Seq2SeqTrainingArguments):
         default=5,
         metadata={
             "help": "gamma, number of tokens the student model proposes for each step."
+        }
+    )
+    mode: str = field(
+        default="offline",
+        metadata={
+            "help": "online mode or offline mode"
+        }
+    )
+    online_eval_interval: int = field(
+        default=10,
+        metadata={
+            "help": "evaluation interval for online training"
+        }
+    )
+    online_update_interval: int = field(
+        default=1,
+        metadata={
+            "help": "parameter update interval for online training"
         }
     )
 
@@ -213,51 +239,138 @@ def train():
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.teacher_model_path,
-        cache_dir=training_args.cache_dir,
+        local_files_only=True,
     )
     tokenizer.pad_token = tokenizer.unk_token
 
+    training_args.max_source_length = data_args.source_max_length
+    training_args.max_target_length = data_args.train_target_max_length
     # Load data
-    # use only 1/8 training and testing data
     if data_args.dataset_name == 'xsum':
         train_dataset = Xsum_Dataset(split = 'train', source_length=data_args.source_max_length, target_length=data_args.train_target_max_length).dataset
         eval_dataset = Xsum_Dataset(split='validation', source_length=data_args.source_max_length, target_length=data_args.val_target_max_length).dataset
         predict_dataset = Xsum_Dataset(split='test', source_length=data_args.source_max_length, target_length=data_args.test_target_max_length).dataset
     elif data_args.dataset_name == 'wikihow':
-        train_dataset = Wikihow_Dataset(split = 'train', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.train_target_max_length)
-        eval_dataset = Wikihow_Dataset(split='validation', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.val_target_max_length)
-        predict_dataset = Wikihow_Dataset(split='test', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.test_target_max_length)
-    else:
+        train_dataset = Wikihow_Dataset(split = 'train', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.train_target_max_length).dataset
+        eval_dataset = Wikihow_Dataset(split='validation', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.val_target_max_length).dataset
+        predict_dataset = Wikihow_Dataset(split='test', path=os.path.join(os.getcwd(), 'data/wikihow/'), source_length=data_args.source_max_length, target_length=data_args.test_target_max_length).dataset
+    elif data_args.dataset_name == 'gsm8k':
+        global load_gsm8k, preprocess_function_gsm8k
+        preprocess_function =preprocess_function_gsm8k
+        train_dataset, predict_dataset = load_gsm8k(train_path=os.path.join(os.getcwd(), 'data/gsm8k/train.jsonl'), test_path=os.path.join(os.getcwd(), 'data/gsm8k/test.jsonl'))
+    elif data_args.dataset_name == 'spider':
+        global preprocess_function_spider
+        preprocess_function = preprocess_function_spider
         raw_datasets = datasets.load_dataset(
             data_args.dataset_name,
             data_args.dataset_config_name,
         )
+    elif data_args.dataset_name == 'wmt16' and dataset_args.dataset_config_name == 'de-en':
+        global preprocess_function_ende
+        # support english to german only
+        preprocess_function = preprocess_function_ende
+        raw_datasets = datasets.load_dataset(
+            data_args.dataset_name,
+            data_args.dataset_config_name,
+        )
+    else:
+        # generic data preprocessing
+        global preprocess_function_generic
+        preprocess_function = preprocess_function_generic
+        raw_datasets = datasets.load_dataset(
+            data_args.dataset_name,
+            data_args.dataset_config_name,
+        )
+        prefix = data_args.source_prefix if data_args.source_prefix is not None else ""
+    
+    partial_preprocess_function = partial(
+            preprocess_function,
+            tokenizer=tokenizer,
+            args=training_args
+        )
+    
+    if data_args.dataset_name == 'gsm8k' and training_args.do_train and training_args.do_eval:
+        # take 1/5 of training set to be evaluation dataset
+        train_indices = range(len(train_dataset)//5 * 4)
+        eval_indices = range(len(train_dataset)//5 * 4, len(train_dataset))
 
-        if training_args.do_train:
-            train_dataset = raw_datasets["train"]
-        if training_args.do_eval:
-            if not "validation" in raw_datasets.keys():
-                train_indices = range(len(raw_datasets["train"])//5 * 4)
-                eval_indices = range(len(raw_datasets["train"])//5 * 4, len(raw_datasets["train"]))
-                
-                train_dataset = datasets.Dataset.from_dict(raw_datasets["train"][train_indices])
-                eval_dataset = datasets.Dataset.from_dict(raw_datasets["train"][eval_indices])
-            
-            else:
-                eval_dataset = raw_datasets["validation"]
+        eval_dataset = datasets.Dataset.from_dict(train_dataset[eval_indices])  
+        train_dataset = datasets.Dataset.from_dict(train_dataset[train_indices])
+
+        print('gsm8k train dataset size: {}'.format(len(train_dataset)))
+        print('gsm8k eval dataset size: {}'.format(len(eval_dataset)))
+
+    # Preprocessing the datasets for summarization tasks.
+    # We need to tokenize inputs and targets.
+    if training_args.do_train:
+        train_dataset = raw_datasets["train"]
+        print('train dataset size: {}'.format(len(train_dataset)))
+        if data_args.max_train_samples is not None:
+            max_train_samples = min(len(train_dataset), data_args.max_train_samples)
+            train_dataset = train_dataset.select(range(max_train_samples))
+        with training_args.main_process_first(desc="train dataset map pre-processing"):
+            train_dataset = train_dataset.map(
+                partial_preprocess_function,
+                num_proc=12,
+                batched=True,
+                remove_columns=train_dataset.column_names,
+                desc="Running tokenizer on train dataset",
+            )
+    if training_args.do_eval:
+        eval_dataset = raw_datasets["validation"]
+        print('eval dataset size: {}'.format(len(eval_dataset)))
+        max_target_length = data_args.val_target_max_length
+        if data_args.max_eval_samples is not None:
+            max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
+            eval_dataset = eval_dataset.select(range(max_eval_samples))
+        with training_args.main_process_first(desc="validation dataset map pre-processing"):
+            eval_dataset = eval_dataset.map(
+                partial_preprocess_function,
+                num_proc=16,
+                batched=True,
+                remove_columns=eval_dataset.column_names,
+                desc="Running tokenizer on eval dataset",
+            )
+    if training_args.do_predict:
         predict_dataset = raw_datasets["test"]
+        print('test dataset size: {}'.format(len(predict_dataset)))
+        max_target_length = data_args.test_target_max_length
+        if data_args.max_predict_samples is not None:
+            max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
+            predict_dataset = predict_dataset.select(range(max_predict_samples))
+        with training_args.main_process_first(desc="prediction dataset map pre-processing"):
+            predict_dataset = predict_dataset.map(
+                partial_preprocess_function,
+                num_proc=16,
+                batched=True,
+                remove_columns=predict_dataset.column_names,
+                desc="Running tokenizer on test dataset",
+            )  
 
     # data partitioning
     if data_args.fast_eval:
-    
         #train_random_indices = tuple(random.sample(range(len(train_dataset)), len(train_dataset)))
         #train_dataset = datasets.Dataset.from_dict(train_dataset[train_random_indices])
+        
+        if training_args.do_eval:
+            if len(eval_dataset) < 200:
+                eval_length = len(eval_dataset)
+            else:
+                eval_length = 200
 
-        eval_random_indices = random.sample(range(len(eval_dataset)), len(eval_dataset)//10)
-        eval_dataset = datasets.Dataset.from_dict(eval_dataset[eval_random_indices])
+            eval_random_indices = random.sample(range(len(eval_dataset)), eval_length)
+            eval_dataset = datasets.Dataset.from_dict(eval_dataset[eval_random_indices])
+            print('fast eval... updated eval dataset size: {}'.format(len(eval_dataset)))
 
-        predict_random_indices = random.sample(range(len(predict_dataset)), len(predict_dataset)//20)
-        predict_dataset = datasets.Dataset.from_dict(predict_dataset[predict_random_indices])
+        if training_args.do_predict:
+            if len(predict_dataset) < 200:
+                eval_length = len(predict_dataset)
+            else:
+                eval_length = 200
+            
+            predict_random_indices = random.sample(range(len(predict_dataset)), eval_length)
+            predict_dataset = datasets.Dataset.from_dict(predict_dataset[predict_random_indices])
+            print('fast eval... updated test dataset size: {}'.format(len(predict_dataset)))
 
     # ---------------------------------------- Data preprocessing -----------------------------------------------
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
@@ -284,93 +397,14 @@ def train():
                 f" `--source_max_length` to {model.config.max_position_embeddings} or to automatically resize the"
                 " model's position encodings by passing `--resize_position_embeddings`."
             )
+    # ------------------------------------------------------------------------------------------------------------ #
 
-    prefix = data_args.source_prefix if data_args.source_prefix is not None else ""
+    training_args.generation_num_beams = (
+        data_args.num_beams if data_args.num_beams is not None else training_args.generation_num_beams
+    )
 
-    # Preprocessing the datasets.
-    # We need to tokenize inputs and targets.
-    if training_args.do_train:
-        column_names = train_dataset.column_names
-    elif training_args.do_eval:
-        column_names = eval_dataset.column_names
-    elif training_args.do_predict:
-        column_names = predict_dataset.column_names
-    else:
-        return
-
-    # Get the column names for input/target.
-    text_column = column_names[0]
-    summary_column = column_names[1]
-
-    # Temporarily set max_target_length for training.
-    max_target_length = data_args.train_target_max_length
-    # default set padding to "max_length"
-    padding = "max_length"
-
-    def preprocess_function(examples):
-        # remove pairs where at least one record is None
-
-        inputs, targets = [], []
-        for i in range(len(examples[text_column])):
-            if examples[text_column][i] and examples[summary_column][i]:
-                inputs.append(examples[text_column][i])
-                targets.append(examples[summary_column][i])
-
-        inputs = [prefix + inp for inp in inputs]
-        model_inputs = tokenizer(inputs, max_length=data_args.source_max_length, padding=padding, truncation=True)
-
-        # Tokenize targets with the `text_target` keyword argument
-        labels = tokenizer(text_target=targets, max_length=max_target_length, padding=padding, truncation=True)
-
-        # If we are padding here, replace all tokenizer.pad_token_id in the labels by -100 when we want to ignore
-        # padding in the loss.
-        if padding == "max_length" and data_args.ignore_pad_token_for_loss:
-            labels["input_ids"] = [
-                [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
-            ]
-
-        model_inputs["labels"] = labels["input_ids"]
-        return model_inputs
-
-    if training_args.do_train:
-        if data_args.max_train_samples is not None:
-            max_train_samples = min(len(train_dataset), data_args.max_train_samples)
-            train_dataset = train_dataset.select(range(max_train_samples))
-        with training_args.main_process_first(desc="train dataset map pre-processing"):
-            train_dataset = train_dataset.map(
-                preprocess_function,
-                batched=True,
-                remove_columns=column_names,
-                desc="Running tokenizer on train dataset",
-            )
-
-    if training_args.do_eval:
-        max_target_length = data_args.val_target_max_length
-        if data_args.max_eval_samples is not None:
-            max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
-            eval_dataset = eval_dataset.select(range(max_eval_samples))
-        with training_args.main_process_first(desc="validation dataset map pre-processing"):
-            eval_dataset = eval_dataset.map(
-                preprocess_function,
-                batched=True,
-                remove_columns=column_names,
-                desc="Running tokenizer on validation dataset",
-            )
-
-    if training_args.do_predict:
-        max_target_length = data_args.test_target_target_max_length
-        if data_args.max_predict_samples is not None:
-            max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
-            predict_dataset = predict_dataset.select(range(max_predict_samples))
-        with training_args.main_process_first(desc="prediction dataset map pre-processing"):
-            predict_dataset = predict_dataset.map(
-                preprocess_function,
-                batched=True,
-                remove_columns=column_names,
-                desc="Running tokenizer on prediction dataset",
-            )
-    # ------------------------------------------------------------------------------------------------------------
-
+    # -------------------------------------------------- run trainer -------------------------------------------------- #
+    # summarization, seq2seq
     # Data collator
     label_pad_token_id = -100 if data_args.ignore_pad_token_for_loss else tokenizer.pad_token_id
     data_collator = transformers.DataCollatorForSeq2Seq(
@@ -380,7 +414,6 @@ def train():
         pad_to_multiple_of=8 if training_args.fp16 else None,
     )
 
-    # -------------------------------------------------- Metric --------------------------------------------------
     metric = evaluate.load("rouge")
     
     def postprocess_text(preds, labels):
@@ -411,38 +444,37 @@ def train():
         prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
         result["gen_len"] = np.mean(prediction_lens)
         return result
-    # ------------------------------------------------------------------------------------------------------------
-    training_args.generation_num_beams = (
-        data_args.num_beams if data_args.num_beams is not None else training_args.generation_num_beams
-    )
-
+    
     trainer = Seq2SeqDistillTrainer(
-        model=model, 
-        teacher_model=teacher_model, 
-        tokenizer=tokenizer, 
-        train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=eval_dataset if training_args.do_eval else None,
-        compute_metrics=compute_metrics if training_args.predict_with_generate else None,
-        propose_num=training_args.max_propose_num,
-        args=training_args,
-    )
+            model=model, 
+            teacher_model=teacher_model, 
+            tokenizer=tokenizer, 
+            train_dataset=train_dataset if training_args.do_train else None,
+            eval_dataset=eval_dataset if training_args.do_eval else None,
+            data_collator=data_collator,
+            compute_metrics=compute_metrics if training_args.predict_with_generate else None,
+            propose_num=training_args.max_propose_num,
+            args=training_args,
+        )
     trainer.add_callback(Seq2SeqDistillTrainerCallback)
+    # ---------------------------------------------------------------------------------------------------------------
 
-    if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
-        train_result = trainer.train(resume_from_checkpoint=True)
-    else:
-        train_result = trainer.train()
-    trainer.save_model()
-    metrics = train_result.metrics
-    max_train_samples = (
-        data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
-    )
-    metrics["train_samples"] = min(max_train_samples, len(train_dataset))
+    if training_args.do_train:
+        if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
+            train_result = trainer.train(resume_from_checkpoint=True)
+        else:
+            train_result = trainer.train()
+        trainer.save_model()
+        metrics = train_result.metrics
+        max_train_samples = (
+            data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+        )
+        metrics["train_samples"] = min(max_train_samples, len(train_dataset))
 
-    trainer.log_metrics("train", metrics)
-    trainer.save_metrics("train", metrics)
-    model.config.use_cache = True
-    trainer.save_state()
+        trainer.log_metrics("train", metrics)
+        trainer.save_metrics("train", metrics)
+        model.config.use_cache = True
+        trainer.save_state()
 
     # Evaluation
     results = {}

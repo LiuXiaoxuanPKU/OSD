@@ -4,6 +4,7 @@ from transformers.trainer_pt_utils import LabelSmoother
 import wandb
 from specInfer.generator import Generator
 from specInfer.generator_seq2seq import Seq2SeqGenerator
+from specInfer.common import pad_to_2d
 from enum import Enum
 import random
 
@@ -20,6 +21,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                  propose_num,
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
+        args = kwargs["args"]
         self.teacher_model = teacher_model
         self.loss_model = "soft_only"
         self.eval_cnt = 0
@@ -27,6 +29,16 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                                    self.teacher_model,
                                    self.tokenizer,
                                    propose_num)
+        
+        self.train_step_cnt = 0
+
+        # online related params
+        self.mode = args.mode
+        self.online_eval_interval = args.online_eval_interval
+        self.online_update_interval = args.online_update_interval
+        self.buffer = []
+        self.alphas = []
+        self.sample_steps = []
 
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
@@ -47,33 +59,25 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         mean_output = output.sum() / (~padding_mask).sum()
         return mean_output
     
-    def get_generated_ids(self, model, tokenizer,
-                          input_ids, max_new_tokens, require_logits,
-                          attention_mask: typing.Optional[torch.FloatTensor] = None):
+    def get_generated_ids(
+        self, 
+        model, 
+        tokenizer,
+        input_ids, 
+        attention_mask, 
+        max_new_tokens, 
+        require_logits):
         with torch.no_grad():
-            if attention_mask != None:
-                outputs = model.generate(
-                    input_ids=input_ids,
-                    max_new_tokens=max_new_tokens,
-                    output_scores=require_logits,
-                    return_dict_in_generate=True,
-                    attention_mask=attention_mask,
-                    pad_token_id=tokenizer.pad_token_id,
-                    bos_token_id=tokenizer.bos_token_id,
-                    eos_token_id=tokenizer.eos_token_id
-                )
-            elif attention_mask == None:
-                outputs = model.generate(
-                    input_ids=input_ids,
-                    max_new_tokens=max_new_tokens,
-                    output_scores=require_logits,
-                    return_dict_in_generate=True,
-                    pad_token_id=tokenizer.pad_token_id,
-                    bos_token_id=tokenizer.bos_token_id,
-                    eos_token_id=tokenizer.eos_token_id
-                )
-            else:
-                raise NotImplementedError()
+            outputs = model.generate(
+                input_ids=input_ids,
+                max_new_tokens=max_new_tokens,
+                output_scores=require_logits,
+                return_dict_in_generate=True,
+                attention_mask=attention_mask,
+                pad_token_id=tokenizer.pad_token_id,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id
+            )
             if require_logits:
                 logits = torch.cat(
                     [score.unsqueeze(1) for score in outputs["scores"]], dim=1)
@@ -81,14 +85,23 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 logits = None
             return outputs["sequences"], logits
 
-    def get_logits(self, model, input_ids, labels, attention_mask):
+    def get_logits(self, model, input_ids, attention_mask, decoder_input_ids):
         return model(
             input_ids=input_ids,
-            labels=labels,
+            decoder_input_ids=decoder_input_ids,
             attention_mask=attention_mask,
         ).logits
     
     def training_step(self, model, inputs):
+        self.train_step_cnt += 1
+        if self.mode == "offline":
+            return self.offline_training_step(model, inputs)
+        elif self.mode == "online":
+            return self.online_training_step(model, inputs)
+        else:
+            raise ValueError()
+
+    def offline_training_step(self, model, inputs):
         max_new_tokens = 128
         max_new_decoder_tokens = 32
         temperature = 1
@@ -108,40 +121,22 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         
         require_logits = True if sample_model == self.teacher_model else False
 
+        input_ids = inputs['input_ids']
+        attention_mask = inputs['attention_mask']
+        decoder_attention_mask = inputs['decoder_attention_mask']
         generated_ids, generated_logits = self.get_generated_ids(sample_model,
                                                                  self.tokenizer,
-                                                                 inputs['input_ids'],
+                                                                 input_ids,
+                                                                 attention_mask,
                                                                  max_new_tokens,
-                                                                 require_logits,
-                                                                 attention_mask=inputs['attention_mask'])
+                                                                 require_logits)
         # prepare inputs for getting logits
         bsz, gen_seq_len = generated_ids.shape
-        
-        label_len = inputs['labels'].shape[-1]
-        input_labels = inputs['labels'].clone()
-
-        bsz_label, input_label_len = input_labels.shape
-        if gen_seq_len >= input_label_len:
-            # pad label ids
-            padding_len = gen_seq_len - input_label_len
-            input_labels = torch.cat([input_labels,
-                                    torch.ones((bsz, padding_len), device='cuda', dtype=torch.long)], dim=1)
-            input_labels[:, -padding_len:] = self.tokenizer.pad_token_id
-            
-            attention_mask = inputs['attention_mask'][:, :gen_seq_len]
-        else:
-            # pad generated id
-            padding_len = input_label_len - gen_seq_len
-            generated_ids = torch.cat([generated_ids,
-                                    torch.ones((bsz, padding_len), device='cuda', dtype=torch.long)], dim=1)
-            generated_ids[:, -padding_len:] = self.tokenizer.pad_token_id
-
-            attention_mask = inputs['attention_mask'][:, :input_label_len]
 
         # get student/teacher logits
-        student_logits = self.get_logits(model, generated_ids, input_labels, attention_mask)
+        student_logits = self.get_logits(model, input_ids, attention_mask, generated_ids)
         with torch.no_grad():
-                teacher_logits = self.get_logits(self.teacher_model, generated_ids, input_labels, attention_mask)
+                teacher_logits = self.get_logits(self.teacher_model, input_ids, attention_mask, generated_ids)
 
         # calculate loss with kl divergence
         output_mask = generated_ids == self.tokenizer.pad_token_id
@@ -178,9 +173,109 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         loss.backward()
         return loss.detach()
 
+    def online_training_step(self, model, inputs):
+        max_new_tokens = 128
+        bsz = inputs["input_ids"].shape[0]
+        assert (
+            bsz == 1
+        ), f"Does not support batch size > 1 in online setting, input batch size: {bsz}"
+        assert (
+            self.args.gradient_accumulation_steps == 1
+        ), f"Does not support grad_acc > 1 in online setting, grad_acc: {self.args.gradient_accumulation_steps}"
+
+        # remove any masking
+        input_ids =  inputs["input_ids"]
+        # use speculative decoding to generate tokens
+        attention_mask = inputs["attention_mask"]
+        decoder_inputs_ids = inputs["decoder_input_ids"]
+        output = self.generator.generate(input_ids, attention_mask,
+                                         max_new_tokens)
+        
+        debug = False
+        if debug:
+            ref_generated = self.get_generated_ids(self.teacher_model, 
+                                                self.tokenizer, 
+                                                input_ids, 
+                                                attention_mask, 
+                                                max_new_tokens, False)[0]
+            print('input:')
+            print(self.tokenizer.decode(input_ids[0], skip_special_tokens=True))
+            print('reference generation:')
+            print(ref_generated)
+            print(self.tokenizer.batch_decode(ref_generated))
+            print('generated output:')
+            print(output.output[0])
+            print(output.alpha_sum)
+            print(output.sample_steps)
+            print("------")
+        
+        token_ids = torch.cat([decoder_inputs_ids, output.generated_ids], dim=-1)
+        wrong_token_ids = [
+            decoder_inputs_ids.shape[-1] + t for t in output.wrong_token_ids
+        ]
+        self.buffer.append((token_ids, wrong_token_ids))
+        self.alphas.append(output.alpha_sum)
+        self.sample_steps.append(output.sample_steps)
+
+        if self.train_step_cnt % self.online_eval_interval == 0:
+            window_size = 10
+            avg_alpha = (
+                sum(self.alphas[-window_size:])
+                * 1.0
+                / sum(self.sample_steps[-window_size:])
+            )
+            if self.args.local_rank == 0:
+                print(f"avg alpha : {avg_alpha}")
+                wandb.log({"alpha": avg_alpha})
+
+        if len(self.buffer) >= self.online_update_interval:
+            self.model.train()  # switch back to training mode
+
+            decoder_inputs_ids = pad_to_2d([x[0] for x in self.buffer], 0)
+            student_logits = self.get_logits(
+                model, input_ids, attention_mask, decoder_inputs_ids
+            )
+            # generate teacher logits as the label
+            # TODO: we can avoid this forward by getting logits during speculative decoding
+            with torch.no_grad():
+                teacher_logits = self.get_logits(
+                    self.teacher_model, input_ids, attention_mask, decoder_inputs_ids
+                )
+
+            # only compute loss at wrong predictions
+            mask = torch.ones_like(decoder_inputs_ids, dtype=torch.bool)
+            for i, data in enumerate(self.buffer):
+                cur_wrong_token_ids = data[1]
+                mask[i, cur_wrong_token_ids] = False
+
+            loss = self.soft_cross_entropy(student_logits, teacher_logits, mask)
+            loss.backward()
+            self.buffer = []
+            return loss.detach()
+        else:
+            return torch.tensor(-1)
+    
+    def log(self, logs):
+        # Remove the 'loss' entry with value 0 before calling the superclass method
+        if 'loss' in logs and logs['loss'] == -1:
+            del logs['loss']
+        
+        # Call the original `log` method of the `Trainer` class
+        super().log(logs)
+    
+    def get_train_dataloader(self):
+        # Create custom DataLoader with shuffle set to False
+        shuffle = False if self.mode == "online" else True
+        dataloader_params = {
+            "batch_size": self.args.per_device_train_batch_size,
+            "shuffle": shuffle,
+            "num_workers": self.args.dataloader_num_workers,
+            "pin_memory": self.args.dataloader_pin_memory,
+        }
+    
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output = self.generator.generate(inputs["input_ids"], 200)
+        output = self.generator.generate(inputs["input_ids"], inputs["attention_mask"], 200)
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, Seq2SeqDistillTrainerCallback):
@@ -210,8 +305,36 @@ class Seq2SeqDistillTrainerCallback(TrainerCallback):
             with open("out", "a") as f:
                 f.write(
                     f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
-            wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
-            wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
+            
+            print(f"generated_token: {self.correct_cnt * 1.0 / self.propose_cnt}")
+            print(f"alpha: {self.alpha * 1.0 / self.sample_steps}")
+        
+            if args.do_train:
+                # where wandb is initiated
+                wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+                wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
+
+        self.eval_step += 1
+        self.correct_cnt = 0
+        self.propose_cnt = 0
+
+        self.alpha = 0
+        self.sample_steps = 0
+    
+    def on_predict(self, args, state, control, **kwargs):
+        if args.local_rank == 0:
+            print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
+            with open("out", "a") as f:
+                f.write(
+                    f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
+            
+            print(f"generated_token: {self.correct_cnt * 1.0 / self.propose_cnt}")
+            print(f"alpha: {self.alpha * 1.0 / self.sample_steps}")
+        
+            if args.do_train:
+                # where wandb is initiated
+                wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+                wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
 
         self.eval_step += 1
         self.correct_cnt = 0

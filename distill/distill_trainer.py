@@ -11,16 +11,16 @@ class SampleSource(Enum):
     Teacher = 2
     Mix = 3
 
-eval_cnt = 0
-
 class DistillTrainer(Trainer):
     def __init__(self,
                  teacher_model,
                  propose_num,
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
+        args = kwargs["args"]
         self.teacher_model = teacher_model
         self.loss_model = "soft_only"
+        self.eval_cnt = 0
         self.generator = Generator(self.model,
                                    self.teacher_model,
                                    self.tokenizer,
@@ -45,11 +45,16 @@ class DistillTrainer(Trainer):
         mean_output = output.sum() / (~padding_mask).sum()
         return mean_output
     
-    def get_generated_ids(self, model, tokenizer,
-                          input_ids, attention_mask, 
-                          max_new_tokens, require_logits):
+    def get_generated_ids(
+        self, 
+        model, 
+        tokenizer,
+        input_ids, 
+        attention_mask, 
+        max_new_tokens, 
+        require_logits):
         with torch.no_grad():
-            outputs = model.generate(
+            outputs = model.module.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 max_new_tokens=max_new_tokens,
@@ -75,7 +80,7 @@ class DistillTrainer(Trainer):
     def training_step(self, model, inputs):
         max_new_tokens = 128
         temperature = 1
-        sample_source = SampleSource.Teacher
+        sample_source = SampleSource.Student
         kl_method = "teacher_student"
 
         # sample token ids
@@ -149,9 +154,6 @@ class DistillTrainer(Trainer):
 
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        if eval_cnt > 10 and eval_cnt % 5 != 0:
-            return None, None, None
-        
         output = self.generator.generate(inputs["input_ids"], 200)
         find = False
         for callback in self.callback_handler.callbacks:
@@ -169,6 +171,7 @@ class DistillTrainer(Trainer):
 class DistillTrainerCallback(TrainerCallback):
     def __init__(self) -> None:
         super().__init__()
+        self.eval_step = 0
         self.correct_cnt = 0
         self.propose_cnt = 0
 
@@ -176,17 +179,14 @@ class DistillTrainerCallback(TrainerCallback):
         self.sample_steps = 0
 
     def on_evaluate(self, args, state, control, **kwargs):
-        global eval_cnt
-        print(f"[{eval_cnt}] {self.correct_cnt}/{self.propose_cnt}")
-        
-        if self.correct_cnt > 0:
-            with open("out", "a") as f:
-                f.write(
-                    f"[{eval_cnt}] {self.correct_cnt}/{self.propose_cnt}\n")
-            wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
-            wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
+        print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
+        with open("out", "a") as f:
+            f.write(
+                f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
+        wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+        wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
 
-        eval_cnt += 1
+        self.eval_step += 1
         self.correct_cnt = 0
         self.propose_cnt = 0
 

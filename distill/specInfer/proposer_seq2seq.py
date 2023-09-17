@@ -106,7 +106,7 @@ class Seq2SeqSmallModelKVCacheProposer(Seq2SeqProposer):
         generated_len = n
         for i in range(n):
             outputs = self.model(input_ids=input_ids, decoder_input_ids=decoder_input_ids, 
-                                attention_mask=attention_mask, 
+                                attention_mask=attention_mask,
                                 past_key_values=past_key_values,
                                 use_cache=True)
             past_key_values = outputs.past_key_values
