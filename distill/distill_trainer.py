@@ -138,7 +138,7 @@ class DistillTrainer(Trainer):
         self.sample_steps.append(output.sample_steps)
 
         if self.train_step_cnt % self.online_eval_interval == 0:
-            window_size = 100
+            window_size = 10
             avg_alpha = (
                 sum(self.alphas[-window_size:])
                 * 1.0
@@ -299,9 +299,9 @@ class DistillTrainer(Trainer):
         return None, None, None
 
     def train(self, resume_from_checkpoint=None):
-        if self.mode == "offline":
-            # Evaluate the model before training
-            self.evaluate()
+        # if self.mode == "offline":
+        #     # Evaluate the model before training
+        #     self.evaluate()
 
         # Now start the actual training
         super().train(resume_from_checkpoint)

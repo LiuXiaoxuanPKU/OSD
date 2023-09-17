@@ -1,10 +1,11 @@
 WANDB_PROJECT=specInfer python distill/train.py \
-    --student_model_path /rscratch/zhendong/lily/llama-160m  \
+    --student_model_path /rscratch/zhendong/lily/llama-160m \
     --teacher_model_path /rscratch/zhendong/lily/vicuna-7b-v1.3/ \
-    --data_path data/gbharti_finance-alpaca_train.json \
-    --eval_data_path data/gbharti_finance-alpaca_eval.json \
+    --data_path data/code_search_net_train.json \
+    --eval_data_path data/code_search_net_test.json \
+    --max_propose_num 5 \
     --bf16 True \
-    --output_dir /rscratch/zhendong/lily/offline_finance-alpaca \
+    --output_dir /rscratch/zhendong/lily/fp32_llama160m_python_offline \
     --num_train_epochs 2 \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 1 \
@@ -13,15 +14,15 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --eval_steps 100 \
     --save_strategy "steps" \
     --save_steps 100 \
-    --save_total_limit 10 \
+    --save_total_limit 100 \
     --learning_rate 1e-5 \
     --weight_decay 0. \
-    --warmup_ratio 0.03 \
+    --warmup_ratio 0.1 \
     --lr_scheduler_type "cosine" \
-    --logging_steps 1 \
     --tf32 True \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name offline_finance-alpaca \
-    --mode offline
+    --run_name fp32_llama160m_python_offline \
+    --mode offline \
+    --logging_steps 1

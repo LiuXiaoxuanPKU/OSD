@@ -24,10 +24,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import transformers
-from transformers import Trainer
 from transformers.trainer_pt_utils import LabelSmoother
-
-from fastchat.conversation import SeparatorStyle
 from fastchat.model.model_adapter import get_conversation_template
 
 from distill_trainer import DistillTrainer, DistillTrainerCallback
@@ -124,9 +121,7 @@ def preprocess(
             conversations = [sources[0][0]["content"]]
             input_ids = tokenizer(
                 conversations,
-                return_tensors="pt",
-                max_length=tokenizer.model_max_length,
-                truncation=True,
+                return_tensors="pt"
             ).input_ids
         else:
             # Apply prompt templates
@@ -174,8 +169,7 @@ def preprocess(
         if do_eval:
             input_ids = tokenizer(
                 conversations,
-                return_tensors="pt",
-                truncation=True,
+                return_tensors="pt"
             ).input_ids
         else:
             input_ids = tokenizer(
@@ -186,10 +180,10 @@ def preprocess(
                 truncation=True,
             ).input_ids
 
-        targets = input_ids.clone()
+        labels = input_ids.clone()    
         return dict(
             input_ids=input_ids,
-            labels=input_ids.clone(),
+            labels=labels,
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
         )
     else:
@@ -306,7 +300,8 @@ def train():
     else:
         teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
             model_args.teacher_model_path,
-            config=teacher_config
+            config=teacher_config,
+            torch_dtype=torch.bfloat16
         )
     teacher_model.cuda()
     print(
