@@ -146,9 +146,16 @@ def preprocess(
         conv = get_conversation_template(model)
         roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
 
+        assert len(sources) == 1
+        assert len(sources[0]) == 2
+        if do_eval:
+            content = ""
+        else:
+            content = sources[0][1]['content']
+            
         sources[0] = [
             {'role': 'user', 'content': sources[0][0]['content']},
-            {'role': 'assistant', 'content': ''}
+            {'role': 'assistant', 'content': content}
         ]
 
         # Apply prompt templates
@@ -171,6 +178,7 @@ def preprocess(
                 conversations,
                 return_tensors="pt"
             ).input_ids
+            targets = input_ids.clone()
         else:
             input_ids = tokenizer(
                 conversations,
@@ -179,11 +187,50 @@ def preprocess(
                 max_length=tokenizer.model_max_length,
                 truncation=True,
             ).input_ids
+            targets = input_ids.clone()
 
-        labels = input_ids.clone()    
+            # Mask targets. Only compute loss on the assistant outputs.
+            sep = conv.sep + conv.roles[1] + ": "
+            for conversation, target in zip(conversations, targets):
+                total_len = int(target.ne(tokenizer.pad_token_id).sum())
+
+                turns = conversation.split(conv.sep2)
+                cur_len = 1
+                target[:cur_len] = IGNORE_TOKEN_ID
+                for i, turn in enumerate(turns):
+                    if turn == "":
+                        break
+                    turn_len = len(tokenizer(turn).input_ids)
+
+                    parts = turn.split(sep)
+                    if len(parts) != 2:
+                        break
+                    parts[0] += sep
+                    # "-2" is hardcoded for the LLaMA tokenizer to make the offset correct.
+                    instruction_len = len(tokenizer(parts[0]).input_ids) - 2
+
+                    # Ignore the user instructions
+                    target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
+                    cur_len += turn_len
+
+                target[cur_len:] = IGNORE_TOKEN_ID
+
+                if True:  # Inspect and check the correctness of masking
+                    z = target.clone()
+                    z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
+                    print(tokenizer.decode(z))
+
+                if cur_len < tokenizer.model_max_length:
+                    if cur_len != total_len:
+                        target[:] = IGNORE_TOKEN_ID
+                        print(
+                            f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
+                            f" (ignored)"
+                        )
+
         return dict(
             input_ids=input_ids,
-            labels=labels,
+            labels=target,
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
         )
     else:

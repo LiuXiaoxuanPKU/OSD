@@ -8,6 +8,7 @@ from enum import Enum
 import random
 from torch.utils.data import DataLoader
 
+IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
 class SampleSource(Enum):
     Student = 1
@@ -36,59 +37,6 @@ class DistillTrainer(Trainer):
         self.buffer = []
         self.alphas = []
         self.sample_steps = []
-
-    def soft_cross_entropy(self, predicts, targets, padding_mask):
-        predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
-        targets_prob = torch.nn.functional.softmax(targets, dim=-1)
-        entropy = -targets_prob * predict_log_prob
-        expand_mask = padding_mask.unsqueeze(-1).expand_as(entropy)
-        entropy.masked_fill_(expand_mask, 0)
-        mean_entropy = entropy.sum() / (~padding_mask).sum()
-        return mean_entropy
-
-    def get_kl(self, predicts, targets, padding_mask):
-        kl_loss = torch.nn.KLDivLoss(reduction="none")
-        predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
-        targets_prob = torch.nn.functional.softmax(targets, dim=-1)
-        output = kl_loss(predict_log_prob, targets_prob)
-        expand_mask = padding_mask.unsqueeze(-1).expand_as(output)
-        output.masked_fill_(expand_mask, 0)
-        mean_output = output.sum() / (~padding_mask).sum()
-        return mean_output
-
-    def get_generated_ids(
-        self,
-        model,
-        tokenizer,
-        input_ids,
-        attention_mask,
-        max_new_tokens,
-        require_logits,
-    ):
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                output_scores=require_logits,
-                return_dict_in_generate=True,
-                pad_token_id=tokenizer.pad_token_id,
-                bos_token_id=tokenizer.bos_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-            if require_logits:
-                logits = torch.cat(
-                    [score.unsqueeze(1) for score in outputs["scores"]], dim=1
-                )
-            else:
-                logits = None
-            return outputs["sequences"], logits
-
-    def get_logits(self, model, input_ids, attention_mask):
-        return model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        ).logits
 
     def training_step(self, model, inputs):
         self.train_step_cnt += 1
@@ -172,28 +120,24 @@ class DistillTrainer(Trainer):
             return loss.detach()
         else:
             return torch.tensor(-1)
-
-    def log(self, logs):
-        # Remove the 'loss' entry with value 0 before calling the superclass method
-        if 'loss' in logs and logs['loss'] == -1:
-            del logs['loss']
-        
-        # Call the original `log` method of the `Trainer` class
-        super().log(logs)
-
-    def get_train_dataloader(self):
-        # Create custom DataLoader with shuffle set to False
-        shuffle = False if self.mode == "online" else True
-        dataloader_params = {
-            "batch_size": self.args.per_device_train_batch_size,
-            "shuffle": shuffle,
-            "num_workers": self.args.dataloader_num_workers,
-            "pin_memory": self.args.dataloader_pin_memory,
-        }
-
-        return self.accelerator.prepare(DataLoader(self.train_dataset, **dataloader_params))
-          
+  
     def offline_training_step(self, model, inputs):
+        input_ids, attention_mask = inputs["input_ids"], inputs["attention_mask"]
+        student_logits = self.get_logits(model, input_ids, attention_mask)
+        teacher_logits = self.get_logits(self.teacher_model, input_ids, attention_mask)
+        
+        temperature = 1
+        output_mask = inputs == IGNORE_TOKEN_ID
+        loss = self.soft_cross_entropy(
+                student_logits / temperature, teacher_logits / temperature, output_mask
+            )
+        if self.args.gradient_accumulation_steps > 1:
+            loss = loss / self.args.gradient_accumulation_steps
+
+        loss.backward()
+        return loss.detach()
+        
+    def offline_training_step_old(self, model, inputs):
         max_new_tokens = 128
         temperature = 1
         sample_source = SampleSource.Teacher
@@ -280,12 +224,29 @@ class DistillTrainer(Trainer):
         loss.backward()
         return loss.detach()
 
+    def log(self, logs):
+        # Remove the 'loss' entry with value 0 before calling the superclass method
+        if 'loss' in logs and logs['loss'] == -1:
+            del logs['loss']
+        
+        # Call the original `log` method of the `Trainer` class
+        super().log(logs)
+
+    def get_train_dataloader(self):
+        # Create custom DataLoader with shuffle set to False
+        shuffle = False if self.mode == "online" else True
+        dataloader_params = {
+            "batch_size": self.args.per_device_train_batch_size,
+            "shuffle": shuffle,
+            "num_workers": self.args.dataloader_num_workers,
+            "pin_memory": self.args.dataloader_pin_memory,
+        }
+
+        return self.accelerator.prepare(DataLoader(self.train_dataset, **dataloader_params))
+      
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        if eval_cnt > 10 and eval_cnt % 5 != 0:
-            return None, None, None
-
-        output = self.generator.generate(inputs["input_ids"], 200)
+        output = self.generator.generate(inputs["input_ids"], 128)
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, DistillTrainerCallback):
@@ -299,13 +260,70 @@ class DistillTrainer(Trainer):
         return None, None, None
 
     def train(self, resume_from_checkpoint=None):
-        # if self.mode == "offline":
-        #     # Evaluate the model before training
-        #     self.evaluate()
+        if self.mode == "offline":
+            # Evaluate the model before training
+            self.evaluate()
 
         # Now start the actual training
         super().train(resume_from_checkpoint)
         
+    
+    ###################### Helper Functions #############################
+    def soft_cross_entropy(self, predicts, targets, padding_mask):
+        predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
+        targets_prob = torch.nn.functional.softmax(targets, dim=-1)
+        entropy = -targets_prob * predict_log_prob
+        expand_mask = padding_mask.unsqueeze(-1).expand_as(entropy)
+        entropy.masked_fill_(expand_mask, 0)
+        mean_entropy = entropy.sum() / (~padding_mask).sum()
+        return mean_entropy
+
+    def get_kl(self, predicts, targets, padding_mask):
+        kl_loss = torch.nn.KLDivLoss(reduction="none")
+        predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
+        targets_prob = torch.nn.functional.softmax(targets, dim=-1)
+        output = kl_loss(predict_log_prob, targets_prob)
+        expand_mask = padding_mask.unsqueeze(-1).expand_as(output)
+        output.masked_fill_(expand_mask, 0)
+        mean_output = output.sum() / (~padding_mask).sum()
+        return mean_output
+
+    def get_generated_ids(
+        self,
+        model,
+        tokenizer,
+        input_ids,
+        attention_mask,
+        max_new_tokens,
+        require_logits,
+    ):
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                output_scores=require_logits,
+                return_dict_in_generate=True,
+                pad_token_id=tokenizer.pad_token_id,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+            if require_logits:
+                logits = torch.cat(
+                    [score.unsqueeze(1) for score in outputs["scores"]], dim=1
+                )
+            else:
+                logits = None
+            return outputs["sequences"], logits
+
+    
+    def get_logits(self, model, input_ids, attention_mask):
+        return model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        ).logits
+
+
 class DistillTrainerCallback(TrainerCallback):
     def __init__(self) -> None:
         super().__init__()
