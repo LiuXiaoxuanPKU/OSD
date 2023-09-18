@@ -1,11 +1,11 @@
 WANDB_PROJECT=specInfer python distill/train.py \
     --student_model_path /rscratch/zhendong/lily/llama-160m \
     --teacher_model_path /rscratch/zhendong/lily/vicuna-7b-v1.3/ \
-    --data_path data/spider_train.json \
-    --eval_data_path data/spider_validation.json \
+    --data_path data/gsm8k_train.json \
+    --eval_data_path data/gsm8k_test.json \
     --max_propose_num 5 \
     --bf16 True \
-    --output_dir /rscratch/zhendong/lily/llama160m_spider_offline \
+    --output_dir /rscratch/zhendong/lily/llama160m_gsm8k_offline \
     --num_train_epochs 2 \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 1 \
@@ -24,5 +24,5 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name llama160m_spider_offline \
+    --run_name llama160m_gsm8k_offline \
     --mode offline
