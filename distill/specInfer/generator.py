@@ -106,6 +106,10 @@ class Generator:
 
     @torch.inference_mode()
     def generate(self, input_ids, max_tokens, temperature=0.01):
+        # make sure all models are in the inference mode
+        self.model.eval()
+        self.proposer.model.eval()
+        
         def sample_method(logits):
             return torch.softmax(logits / temperature, dim=-1)
 
