@@ -265,7 +265,7 @@ def train():
             data_args.dataset_name,
             data_args.dataset_config_name,
         )
-    elif data_args.dataset_name == 'wmt16' and dataset_args.dataset_config_name == 'de-en':
+    elif data_args.dataset_name == 'wmt16' and data_args.dataset_config_name == 'de-en':
         global preprocess_function_ende
         # support english to german only
         preprocess_function = preprocess_function_ende
@@ -281,13 +281,28 @@ def train():
             data_args.dataset_name,
             data_args.dataset_config_name,
         )
-        prefix = data_args.source_prefix if data_args.source_prefix is not None else ""
     
-    partial_preprocess_function = partial(
-            preprocess_function,
-            tokenizer=tokenizer,
-            args=training_args
-        )
+    prefix = data_args.source_prefix if data_args.source_prefix is not None else ""
+    
+    summarization_tasks = set([
+    'cnn_dailymail',
+    'xsum',
+    'wikihow'
+    ])
+    if data_args.dataset_name in summarization_tasks:
+        print(f'prefix: {prefix}')
+        partial_preprocess_function = partial(
+                    preprocess_function,
+                    tokenizer=tokenizer,
+                    args=data_args,
+                    prefix=prefix
+            )
+    else:
+        partial_preprocess_function = partial(
+                preprocess_function,
+                tokenizer=tokenizer,
+                args=data_args,
+            )
     
     if data_args.dataset_name == 'gsm8k' and training_args.do_train and training_args.do_eval:
         # take 1/5 of training set to be evaluation dataset

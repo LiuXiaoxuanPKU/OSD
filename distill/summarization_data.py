@@ -90,8 +90,10 @@ def preprocess_function_generic(examples, tokenizer, args, prefix=""):
   # remove pairs where at least one record is None
 
   # Get the column names for input/target.
-  text_column = examples[0]
-  summary_column = examples[1]
+  keys = list(examples.keys())
+  #print(f'keys: {keys}')
+  text_column = keys[0]
+  summary_column = keys[1]
 
   # Temporarily set max_target_length for training.
   max_target_length = args.train_target_max_length
@@ -107,7 +109,7 @@ def preprocess_function_generic(examples, tokenizer, args, prefix=""):
           targets.append(examples[summary_column][i])
 
   inputs = [prefix + inp for inp in inputs]
-  model_inputs = tokenizer(inputs, max_length=data_args.source_max_length, padding=padding, truncation=True, return_tensors="pt", )
+  model_inputs = tokenizer(inputs, max_length=args.source_max_length, padding=padding, truncation=True, return_tensors="pt", )
 
   # Tokenize targets with the `text_target` keyword argument
   labels = tokenizer(text_target=targets, max_length=max_target_length, padding=padding, truncation=True, return_tensors="pt", )

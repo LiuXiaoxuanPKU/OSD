@@ -54,7 +54,7 @@ def preprocess_function_gsm8k(examples, tokenizer, args):
     padding = 'max_length'
     model_inputs = tokenizer(
         inputs,
-        max_length=args.max_source_length,
+        max_length=args.source_max_length,
         padding=padding,
         truncation=True,
         return_tensors="pt",
@@ -62,7 +62,7 @@ def preprocess_function_gsm8k(examples, tokenizer, args):
     # Tokenize targets with the `text_target` keyword argument
     labels = tokenizer(
         text_target=targets,
-        max_length=args.max_target_length,
+        max_length=args.train_target_max_length,
         padding=padding,
         truncation=True,
         return_tensors="pt", 
@@ -128,7 +128,7 @@ def preprocess_function_spider(examples, tokenizer, args, prefix="Could you tran
     padding = 'max_length'
     model_inputs = tokenizer(
         inputs,
-        max_length=args.max_source_length,
+        max_length=args.source_max_length,
         padding=padding,
         truncation=True,
         return_tensors="pt",
@@ -136,7 +136,7 @@ def preprocess_function_spider(examples, tokenizer, args, prefix="Could you tran
     # Tokenize targets with the `text_target` keyword argument
     labels = tokenizer(
         text_target=targets,
-        max_length=args.max_target_length,
+        max_length=args.train_target_max_length,
         padding=padding,
         truncation=True,
         return_tensors="pt",
@@ -173,7 +173,7 @@ def preprocess_function_ende(examples, tokenizer, args, prefix="translate Englis
     padding = 'max_length'
     model_inputs = tokenizer(
         inputs,
-        max_length=args.max_source_length,
+        max_length=args.source_max_length,
         padding=padding,
         truncation=True,
         return_tensors="pt",
@@ -181,7 +181,7 @@ def preprocess_function_ende(examples, tokenizer, args, prefix="translate Englis
     # Tokenize targets with the `text_target` keyword argument
     labels = tokenizer(
         text_target=targets,
-        max_length=args.max_target_length,
+        max_length=args.train_target_max_length,
         padding=padding,
         truncation=True,
         return_tensors="pt",
