@@ -1,28 +1,26 @@
 WANDB_PROJECT=specInfer python distill/train.py \
-    --student_model_path /rscratch/zhendong/lily/llama-160m \
-    --teacher_model_path /rscratch/zhendong/lily/vicuna-7b-v1.3/ \
-    --data_path data/spider_train.json \
+    --student_model_path JackFram/llama-160m\
+    --teacher_model_path /data/vicuna-7b-v1.3/ \
+    --data_path data/spider_train_with_answer.json \
     --eval_data_path data/spider_validation.json \
     --max_propose_num 5 \
     --bf16 True \
-    --output_dir /rscratch/zhendong/lily/llama160m_spider_offline \
+    --output_dir /data/offline-refactor_spider_llama160m_debug \
     --num_train_epochs 2 \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 8 \
-    --evaluation_strategy "steps" \
-    --eval_steps 100 \
+    --per_device_train_batch_size 8 \
+    --gradient_accumulation_steps 16 \
+    --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 100 \
+    --save_steps 500 \
     --save_total_limit 100 \
-    --learning_rate 1e-5 \
+    --learning_rate 2e-5 \
     --weight_decay 0. \
-    --warmup_ratio 0.1 \
+    --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --tf32 True \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name llama160m_spider_offline \
+    --run_name offline-refactor_spider_llama160m_debug \
     --mode offline

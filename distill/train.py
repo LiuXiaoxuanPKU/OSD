@@ -147,10 +147,10 @@ def preprocess(
         roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
 
         assert len(sources) == 1
-        assert len(sources[0]) == 2
         if do_eval:
             content = ""
         else:
+            assert len(sources[0]) == 2, f"{sources}"
             content = sources[0][1]['content']
             
         sources[0] = [
@@ -193,7 +193,6 @@ def preprocess(
             sep = conv.sep + conv.roles[1] + ": "
             for conversation, target in zip(conversations, targets):
                 total_len = int(target.ne(tokenizer.pad_token_id).sum())
-
                 turns = conversation.split(conv.sep2)
                 cur_len = 1
                 target[:cur_len] = IGNORE_TOKEN_ID
@@ -215,7 +214,7 @@ def preprocess(
 
                 target[cur_len:] = IGNORE_TOKEN_ID
 
-                if True:  # Inspect and check the correctness of masking
+                if False:  # Inspect and check the correctness of masking
                     z = target.clone()
                     z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
                     print(tokenizer.decode(z))
@@ -230,7 +229,7 @@ def preprocess(
 
         return dict(
             input_ids=input_ids,
-            labels=target,
+            labels=targets,
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
         )
     else:
@@ -347,8 +346,7 @@ def train():
     else:
         teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
             model_args.teacher_model_path,
-            config=teacher_config,
-            torch_dtype=torch.bfloat16
+            config=teacher_config
         )
     teacher_model.cuda()
     print(
@@ -358,7 +356,7 @@ def train():
         model_args.teacher_model_path,
         cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
-        padding_side="left",
+        padding_side="right",
         use_fast=False,
     )
     tokenizer.pad_token = tokenizer.unk_token

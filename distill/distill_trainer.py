@@ -124,12 +124,20 @@ class DistillTrainer(Trainer):
     def offline_training_step(self, model, inputs):
         input_ids, attention_mask = inputs["input_ids"], inputs["attention_mask"]
         student_logits = self.get_logits(model, input_ids, attention_mask)
-        teacher_logits = self.get_logits(self.teacher_model, input_ids, attention_mask)
+        with torch.no_grad():
+            teacher_logits = self.get_logits(self.teacher_model, input_ids, attention_mask)
+        
+        # shift labels
+        student_logits = student_logits[..., :-1, :].float()
+        teacher_logits = teacher_logits[..., :-1, :].float()
+        labels = inputs["labels"][..., 1:]
         
         temperature = 1
-        output_mask = inputs == IGNORE_TOKEN_ID
+        output_mask = labels == IGNORE_TOKEN_ID
         loss = self.soft_cross_entropy(
-                student_logits / temperature, teacher_logits / temperature, output_mask
+                student_logits / temperature,
+                teacher_logits / temperature,
+                output_mask 
             )
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
@@ -259,13 +267,13 @@ class DistillTrainer(Trainer):
 
         return None, None, None
 
-    def train(self, resume_from_checkpoint=None):
-        if self.mode == "offline":
-            # Evaluate the model before training
-            self.evaluate()
+    # def train(self, resume_from_checkpoint=None):
+    #     if self.mode == "offline":
+    #         # Evaluate the model before training
+    #         self.evaluate()
 
-        # Now start the actual training
-        super().train(resume_from_checkpoint)
+    #     # Now start the actual training
+    #     super().train(resume_from_checkpoint)
         
     
     ###################### Helper Functions #############################
