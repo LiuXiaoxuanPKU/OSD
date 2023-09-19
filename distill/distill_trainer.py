@@ -14,6 +14,11 @@ class SampleSource(Enum):
     Student = 1
     Teacher = 2
     Mix = 3
+    
+class KLMethod(Enum):
+    Forward = 1
+    Reverse = 2
+    JSD = 3
 
 
 eval_cnt = 0
@@ -122,23 +127,82 @@ class DistillTrainer(Trainer):
             return torch.tensor(-1)
   
     def offline_training_step(self, model, inputs):
-        input_ids, attention_mask = inputs["input_ids"], inputs["attention_mask"]
-        student_logits = self.get_logits(model, input_ids, attention_mask)
-        with torch.no_grad():
-            teacher_logits = self.get_logits(self.teacher_model, input_ids, attention_mask)
+        sample_source = SampleSource.Teacher
+        kl_method = KLMethod.Forward
+        max_new_tokens = 128
+        student_temperature = 1.0
+        teacher_temperature = 0.1
         
-        # shift labels
+        if sample_source == SampleSource.Mix:
+            student_ratio = 0.5
+        
+        if kl_method == KLMethod.JSD:
+            fwd_loss_ratio = 0.9
+        
+        # sample token ids
+        if sample_source == SampleSource.Teacher:
+            sample_student = False
+        elif sample_source == SampleSource.Student:
+            sample_student = True
+        elif sample_source == SampleSource.Mix:
+            sample_student = True if random.random() < student_ratio else False   
+        
+        if sample_student:
+            generated_ids, _ = self.get_generated_ids(
+                    model,
+                    self.tokenizer,
+                    inputs["prompt_ids"],
+                    inputs["prompt_attention_mask"],
+                    max_new_tokens,
+                    False,
+                )
+            bsz, total_seq_len = generated_ids.shape
+            gen_len = total_seq_len - inputs["input_ids"].shape[-1]
+            attention_mask = torch.cat(
+                [
+                    inputs["attention_mask"],
+                    torch.ones((bsz, gen_len), device="cuda", dtype=torch.long),
+                ],
+                dim=1,
+            )
+            output_mask = generated_ids[..., 1:] == self.tokenizer.pad_token_id
+        else:
+            generated_ids, attention_mask = inputs["input_ids"], inputs["attention_mask"]
+            output_mask = inputs["labels"][..., 1:] == IGNORE_TOKEN_ID
+            
+        # get student/teacher logits
+        student_logits = self.get_logits(model, generated_ids, attention_mask)
+        with torch.no_grad():
+            teacher_logits = self.get_logits(self.teacher_model, generated_ids, attention_mask)
         student_logits = student_logits[..., :-1, :].float()
         teacher_logits = teacher_logits[..., :-1, :].float()
-        labels = inputs["labels"][..., 1:]
         
-        temperature = 1
-        output_mask = labels == IGNORE_TOKEN_ID
-        loss = self.soft_cross_entropy(
-                student_logits / temperature,
-                teacher_logits / temperature,
-                output_mask 
+        # calculate loss       
+        if kl_method == KLMethod.Forward:
+            loss = self.soft_cross_entropy(
+                    student_logits / student_temperature,
+                    teacher_logits / teacher_temperature,
+                    output_mask 
+                )
+        elif kl_method == KLMethod.Reverse:
+            loss = self.get_kl(
+                teacher_logits / teacher_temperature, 
+                student_logits / student_temperature, 
+                output_mask
             )
+        elif kl_method == KLMethod.JSD:
+            reverse_loss = self.get_kl(
+                teacher_logits / teacher_temperature, 
+                student_logits / student_temperature, 
+                output_mask
+            )
+            fwd_loss = self.get_kl(
+                student_logits / student_temperature, 
+                teacher_logits / teacher_temperature, 
+                output_mask
+            )
+            loss = fwd_loss_ratio * fwd_loss + (1 - fwd_loss_ratio) * reverse_loss
+        
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
 

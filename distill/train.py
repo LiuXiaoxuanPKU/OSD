@@ -227,10 +227,26 @@ def preprocess(
                             f" (ignored)"
                         )
 
+        # # generate prompt_ids
+        # tokenizer.padding_side = "left"
+        # conv = get_conversation_template(model)
+        # conv.append_message(conv.roles[0], sources[0][0]['content'])
+        # conv.append_message(conv.roles[1], "")
+        # promt = conv.get_prompt()
+        # prompts = tokenizer(
+        #     promt,
+        #     return_tensors="pt",
+        #     padding="max_length",
+        #     truncation=True,
+        # )
+        # tokenizer.padding_side = "right"
+        
         return dict(
             input_ids=input_ids,
             labels=targets,
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
+            # prompt_ids=prompts["input_ids"],
+            # prompt_attention_mask=prompts["attention_mask"]
         )
     else:
         raise NotImplementedError(
