@@ -85,6 +85,18 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "parameter update interval for online training"
         }
     )
+    sample_source: str = field(
+        default="student",
+        metadata = {
+            "choices" : ["student", "teacher", "mix"]
+        }
+    )
+    kl_method: str = field(
+        default="forward",
+        metadata = {
+            "choices" : ["forward", "reverse", "jsd"]
+        }
+    )
 
 
 local_rank = None
@@ -227,26 +239,26 @@ def preprocess(
                             f" (ignored)"
                         )
 
-        # # generate prompt_ids
-        # tokenizer.padding_side = "left"
-        # conv = get_conversation_template(model)
-        # conv.append_message(conv.roles[0], sources[0][0]['content'])
-        # conv.append_message(conv.roles[1], "")
-        # promt = conv.get_prompt()
-        # prompts = tokenizer(
-        #     promt,
-        #     return_tensors="pt",
-        #     padding="max_length",
-        #     truncation=True,
-        # )
-        # tokenizer.padding_side = "right"
+        # generate prompt_ids
+        tokenizer.padding_side = "left"
+        conv = get_conversation_template(model)
+        conv.append_message(conv.roles[0], sources[0][0]['content'])
+        conv.append_message(conv.roles[1], "")
+        promt = conv.get_prompt()
+        prompts = tokenizer(
+            promt,
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+        )
+        tokenizer.padding_side = "right"
         
         return dict(
             input_ids=input_ids,
             labels=targets,
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
-            # prompt_ids=prompts["input_ids"],
-            # prompt_attention_mask=prompts["attention_mask"]
+            prompt_ids=prompts["input_ids"],
+            prompt_attention_mask=prompts["attention_mask"]
         )
     else:
         raise NotImplementedError(
@@ -285,6 +297,8 @@ class LazySupervisedDataset(Dataset):
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
             attention_mask=ret["attention_mask"][0],
+            prompt_ids=ret["prompt_ids"][0],
+            prompt_attention_mask=ret["prompt_attention_mask"][0]
         )
         self.cached_data_dict[i] = ret
 

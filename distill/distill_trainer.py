@@ -14,12 +14,23 @@ class SampleSource(Enum):
     Student = 1
     Teacher = 2
     Mix = 3
-    
+
+SAMPLE_SOURCE_MAP = {
+    "student" : SampleSource.Student,
+    "teacher" : SampleSource.Teacher,
+    "mix" : SampleSource.Mix
+}
+
 class KLMethod(Enum):
     Forward = 1
     Reverse = 2
     JSD = 3
 
+KL_METHOD_MAP = {
+    "forward" : KLMethod.Forward,
+    "reverse" : KLMethod.Reverse,
+    "jsd" : KLMethod.JSD
+}
 
 eval_cnt = 0
 
@@ -42,6 +53,9 @@ class DistillTrainer(Trainer):
         self.buffer = []
         self.alphas = []
         self.sample_steps = []
+        
+        self.sample_source = SAMPLE_SOURCE_MAP[args.sample_source]
+        self.kl_method = KL_METHOD_MAP[args.kl_method]
 
     def training_step(self, model, inputs):
         self.train_step_cnt += 1
@@ -127,24 +141,22 @@ class DistillTrainer(Trainer):
             return torch.tensor(-1)
   
     def offline_training_step(self, model, inputs):
-        sample_source = SampleSource.Teacher
-        kl_method = KLMethod.Forward
         max_new_tokens = 128
         student_temperature = 1.0
         teacher_temperature = 0.1
         
-        if sample_source == SampleSource.Mix:
+        if self.sample_source == SampleSource.Mix:
             student_ratio = 0.5
         
-        if kl_method == KLMethod.JSD:
+        if self.kl_method == KLMethod.JSD:
             fwd_loss_ratio = 0.9
         
         # sample token ids
-        if sample_source == SampleSource.Teacher:
+        if self.sample_source == SampleSource.Teacher:
             sample_student = False
-        elif sample_source == SampleSource.Student:
+        elif self.sample_source == SampleSource.Student:
             sample_student = True
-        elif sample_source == SampleSource.Mix:
+        elif self.sample_source == SampleSource.Mix:
             sample_student = True if random.random() < student_ratio else False   
         
         if sample_student:
@@ -157,15 +169,18 @@ class DistillTrainer(Trainer):
                     False,
                 )
             bsz, total_seq_len = generated_ids.shape
-            gen_len = total_seq_len - inputs["input_ids"].shape[-1]
+            prompt_len = inputs["prompt_ids"].shape[-1]
+            gen_len = total_seq_len - prompt_len
             attention_mask = torch.cat(
                 [
-                    inputs["attention_mask"],
+                    inputs["prompt_attention_mask"],
                     torch.ones((bsz, gen_len), device="cuda", dtype=torch.long),
                 ],
                 dim=1,
             )
             output_mask = generated_ids[..., 1:] == self.tokenizer.pad_token_id
+            output_mask[..., :prompt_len-1] = True # Ignore prompt when calculating loss
+            # print(f"bsz: {bsz}, total_len: {total_seq_len}, gen_len: {gen_len}, output_sum:{(~output_mask).sum()}")
         else:
             generated_ids, attention_mask = inputs["input_ids"], inputs["attention_mask"]
             output_mask = inputs["labels"][..., 1:] == IGNORE_TOKEN_ID
@@ -178,19 +193,19 @@ class DistillTrainer(Trainer):
         teacher_logits = teacher_logits[..., :-1, :].float()
         
         # calculate loss       
-        if kl_method == KLMethod.Forward:
+        if self.kl_method == KLMethod.Forward:
             loss = self.soft_cross_entropy(
                     student_logits / student_temperature,
                     teacher_logits / teacher_temperature,
                     output_mask 
                 )
-        elif kl_method == KLMethod.Reverse:
+        elif self.kl_method == KLMethod.Reverse:
             loss = self.get_kl(
                 teacher_logits / teacher_temperature, 
                 student_logits / student_temperature, 
                 output_mask
             )
-        elif kl_method == KLMethod.JSD:
+        elif self.kl_method == KLMethod.JSD:
             reverse_loss = self.get_kl(
                 teacher_logits / teacher_temperature, 
                 student_logits / student_temperature, 

@@ -1,26 +1,3 @@
-WANDB_PROJECT=specInfer python distill/train.py \
-    --student_model_path JackFram/llama-160m\
-    --teacher_model_path /data/vicuna-7b-v1.3/ \
-    --data_path data/spider_train_with_answer.json \
-    --eval_data_path data/spider_validation.json \
-    --max_propose_num 5 \
-    --bf16 True \
-    --output_dir /data/offline-refactor_spider_llama160m_debug \
-    --num_train_epochs 2 \
-    --per_device_train_batch_size 8 \
-    --gradient_accumulation_steps 16 \
-    --evaluation_strategy "no" \
-    --save_strategy "steps" \
-    --save_steps 500 \
-    --save_total_limit 100 \
-    --learning_rate 2e-5 \
-    --weight_decay 0. \
-    --warmup_ratio 0.03 \
-    --lr_scheduler_type "cosine" \
-    --logging_steps 1 \
-    --tf32 True \
-    --model_max_length 2048 \
-    --gradient_checkpointing True \
-    --lazy_preprocess True \
-    --run_name offline-refactor_spider_llama160m_debug \
-    --mode offline
+bash bash_scripts/run_spider_mix_fwd.sh
+bash bash_scripts/run_spider_teacher_fwd.sh
+bash bash_scripts/run_spider_student_fwd.sh
