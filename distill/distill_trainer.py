@@ -10,26 +10,32 @@ from torch.utils.data import DataLoader
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
+
 class SampleSource(Enum):
     Student = 1
     Teacher = 2
-    Mix = 3
+    MixRequest = 3
+    MixToken = 4
+
 
 SAMPLE_SOURCE_MAP = {
-    "student" : SampleSource.Student,
-    "teacher" : SampleSource.Teacher,
-    "mix" : SampleSource.Mix
+    "student": SampleSource.Student,
+    "teacher": SampleSource.Teacher,
+    "mix_request": SampleSource.MixRequest,
+    "mix_token": SampleSource.MixToken,
 }
+
 
 class KLMethod(Enum):
     Forward = 1
     Reverse = 2
     JSD = 3
 
+
 KL_METHOD_MAP = {
-    "forward" : KLMethod.Forward,
-    "reverse" : KLMethod.Reverse,
-    "jsd" : KLMethod.JSD
+    "forward": KLMethod.Forward,
+    "reverse": KLMethod.Reverse,
+    "jsd": KLMethod.JSD
 }
 
 eval_cnt = 0
@@ -40,7 +46,6 @@ class DistillTrainer(Trainer):
         super().__init__(*args, **kwargs)
         args = kwargs["args"]
         self.teacher_model = teacher_model
-        self.loss_model = "soft_only"
         self.generator = Generator(
             self.model, self.teacher_model, self.tokenizer, args.max_propose_num
         )
@@ -53,7 +58,7 @@ class DistillTrainer(Trainer):
         self.buffer = []
         self.alphas = []
         self.sample_steps = []
-        
+
         self.sample_source = SAMPLE_SOURCE_MAP[args.sample_source]
         self.kl_method = KL_METHOD_MAP[args.kl_method]
 
@@ -77,25 +82,25 @@ class DistillTrainer(Trainer):
         ), f"Does not support grad_acc > 1 in online setting, grad_acc: {self.args.gradient_accumulation_steps}"
 
         # remove any masking
-        input_ids =  inputs["input_ids"][inputs["attention_mask"]].unsqueeze(0)
+        input_ids = inputs["input_ids"][inputs["attention_mask"]].unsqueeze(0)
         # use speculative decoding to generate tokens
         output = self.generator.generate(input_ids,
                                          max_new_tokens)
-        
+
         debug = False
         if debug:
-            ref_generated = self.get_generated_ids(self.teacher_model, 
-                                                self.tokenizer, 
-                                                input_ids, 
-                                                torch.ones_like(input_ids), 
-                                                max_new_tokens, False)[0]
+            ref_generated = self.get_generated_ids(self.teacher_model,
+                                                   self.tokenizer,
+                                                   input_ids,
+                                                   torch.ones_like(input_ids),
+                                                   max_new_tokens, False)[0]
             print(ref_generated)
             print(self.tokenizer.batch_decode(ref_generated))
             print(output.output)
             print(output.alpha_sum)
             print(output.sample_steps)
             print("------")
-        
+
         token_ids = torch.cat([input_ids, output.generated_ids], dim=-1)
         wrong_token_ids = [
             input_ids.shape[-1] + t for t in output.wrong_token_ids
@@ -133,97 +138,124 @@ class DistillTrainer(Trainer):
                 cur_wrong_token_ids = data[1]
                 mask[i, cur_wrong_token_ids] = False
 
-            loss = self.soft_cross_entropy(student_logits, teacher_logits, mask)
+            loss = self.soft_cross_entropy(
+                student_logits, teacher_logits, mask)
             loss.backward()
             self.buffer = []
             return loss.detach()
         else:
             return torch.tensor(-1)
-  
+
     def offline_training_step(self, model, inputs):
         max_new_tokens = 128
         student_temperature = 1.0
-        teacher_temperature = 0.1
+        teacher_temperature = 1.0
+
+        if self.sample_source == SampleSource.MixRequest:
+            student_request_ratio = 0.5
         
-        if self.sample_source == SampleSource.Mix:
-            student_ratio = 0.5
-        
+        if self.sample_source == SampleSource.MixToken:
+            student_token_ratio = 0.5
+
         if self.kl_method == KLMethod.JSD:
             fwd_loss_ratio = 0.9
-        
+
+        sample_mix_token = False
         # sample token ids
         if self.sample_source == SampleSource.Teacher:
             sample_student = False
         elif self.sample_source == SampleSource.Student:
             sample_student = True
-        elif self.sample_source == SampleSource.Mix:
-            sample_student = True if random.random() < student_ratio else False   
-        
-        if sample_student:
+        elif self.sample_source == SampleSource.MixRequest:
+            sample_student = True if random.random() < student_request_ratio else False
+        elif self.sample_source == SampleSource.MixToken:
+            sample_mix_token = True
+
+        # sample tokens
+        if sample_mix_token:
+            generated_ids = self.get_mix_generated_ids(
+                model,
+                self.teacher_model,
+                self.tokenizer,
+                inputs["prompt_ids"],
+                inputs["prompt_attention_mask"],
+                max_new_tokens,
+                student_token_ratio
+            )
+        elif sample_student:
             generated_ids, _ = self.get_generated_ids(
-                    model,
-                    self.tokenizer,
-                    inputs["prompt_ids"],
-                    inputs["prompt_attention_mask"],
-                    max_new_tokens,
-                    False,
-                )
+                model,
+                self.tokenizer,
+                inputs["prompt_ids"],
+                inputs["prompt_attention_mask"],
+                max_new_tokens,
+                False,
+            )
+        else:
+            generated_ids = inputs["input_ids"]
+        
+        # preparet attention_mask and output_mask
+        if sample_mix_token or sample_student:
             bsz, total_seq_len = generated_ids.shape
             prompt_len = inputs["prompt_ids"].shape[-1]
             gen_len = total_seq_len - prompt_len
             attention_mask = torch.cat(
                 [
                     inputs["prompt_attention_mask"],
-                    torch.ones((bsz, gen_len), device="cuda", dtype=torch.long),
+                    torch.ones((bsz, gen_len), device="cuda",
+                               dtype=torch.long),
                 ],
                 dim=1,
             )
             output_mask = generated_ids[..., 1:] == self.tokenizer.pad_token_id
-            output_mask[..., :prompt_len-1] = True # Ignore prompt when calculating loss
+            # Ignore prompt when calculating loss
+            output_mask[..., :prompt_len-1] = True
             # print(f"bsz: {bsz}, total_len: {total_seq_len}, gen_len: {gen_len}, output_sum:{(~output_mask).sum()}")
         else:
-            generated_ids, attention_mask = inputs["input_ids"], inputs["attention_mask"]
+            attention_mask = inputs["attention_mask"]
             output_mask = inputs["labels"][..., 1:] == IGNORE_TOKEN_ID
             
         # get student/teacher logits
         student_logits = self.get_logits(model, generated_ids, attention_mask)
         with torch.no_grad():
-            teacher_logits = self.get_logits(self.teacher_model, generated_ids, attention_mask)
+            teacher_logits = self.get_logits(
+                self.teacher_model, generated_ids, attention_mask)
         student_logits = student_logits[..., :-1, :].float()
         teacher_logits = teacher_logits[..., :-1, :].float()
-        
-        # calculate loss       
+
+        # calculate loss
         if self.kl_method == KLMethod.Forward:
             loss = self.soft_cross_entropy(
-                    student_logits / student_temperature,
-                    teacher_logits / teacher_temperature,
-                    output_mask 
-                )
+                student_logits / student_temperature,
+                teacher_logits / teacher_temperature,
+                output_mask
+            )
         elif self.kl_method == KLMethod.Reverse:
             loss = self.get_kl(
-                teacher_logits / teacher_temperature, 
-                student_logits / student_temperature, 
+                teacher_logits / teacher_temperature,
+                student_logits / student_temperature,
                 output_mask
             )
         elif self.kl_method == KLMethod.JSD:
             reverse_loss = self.get_kl(
-                teacher_logits / teacher_temperature, 
-                student_logits / student_temperature, 
+                teacher_logits / teacher_temperature,
+                student_logits / student_temperature,
                 output_mask
             )
             fwd_loss = self.get_kl(
-                student_logits / student_temperature, 
-                teacher_logits / teacher_temperature, 
+                student_logits / student_temperature,
+                teacher_logits / teacher_temperature,
                 output_mask
             )
-            loss = fwd_loss_ratio * fwd_loss + (1 - fwd_loss_ratio) * reverse_loss
-        
+            loss = fwd_loss_ratio * fwd_loss + \
+                (1 - fwd_loss_ratio) * reverse_loss
+
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
 
         loss.backward()
         return loss.detach()
-        
+
     def offline_training_step_old(self, model, inputs):
         max_new_tokens = 128
         temperature = 1
@@ -264,7 +296,7 @@ class DistillTrainer(Trainer):
 
         # get student/teacher logits
         student_logits = self.get_logits(model, generated_ids, attention_mask)[
-            :, -gen_len - 1 : -1, :
+            :, -gen_len - 1: -1, :
         ]
         with torch.no_grad():
             if generated_logits is not None:
@@ -272,10 +304,11 @@ class DistillTrainer(Trainer):
             else:
                 teacher_logits = self.get_logits(
                     self.teacher_model, generated_ids, attention_mask
-                )[:, -gen_len - 1 : -1, :]
+                )[:, -gen_len - 1: -1, :]
 
         # calculate loss with kl divergence
-        output_mask = generated_ids[:, -gen_len:] == self.tokenizer.pad_token_id
+        output_mask = generated_ids[:, -
+                                    gen_len:] == self.tokenizer.pad_token_id
         if kl_method == "teacher_student":
             loss = self.soft_cross_entropy(
                 student_logits / temperature, teacher_logits / temperature, output_mask
@@ -315,7 +348,7 @@ class DistillTrainer(Trainer):
         # Remove the 'loss' entry with value 0 before calling the superclass method
         if 'loss' in logs and logs['loss'] == -1:
             del logs['loss']
-        
+
         # Call the original `log` method of the `Trainer` class
         super().log(logs)
 
@@ -330,7 +363,7 @@ class DistillTrainer(Trainer):
         }
 
         return self.accelerator.prepare(DataLoader(self.train_dataset, **dataloader_params))
-      
+
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         output = self.generator.generate(inputs["input_ids"], 128)
@@ -353,9 +386,9 @@ class DistillTrainer(Trainer):
 
     #     # Now start the actual training
     #     super().train(resume_from_checkpoint)
-        
-    
+
     ###################### Helper Functions #############################
+
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
         targets_prob = torch.nn.functional.softmax(targets, dim=-1)
@@ -403,7 +436,33 @@ class DistillTrainer(Trainer):
                 logits = None
             return outputs["sequences"], logits
 
-    
+    def get_mix_generated_ids(
+        self,
+        student_model,
+        teacher_model,
+        tokenizer,
+        input_ids,
+        attention_mask,
+        max_new_tokens,
+        mix_ratio
+    ):
+        bsz = input_ids.shape[0]
+        for i in range(max_new_tokens):
+            sample_model = student_model if random.random() < mix_ratio else teacher_model
+            outputs = sample_model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=1,
+                return_dict_in_generate=True,
+                pad_token_id=tokenizer.pad_token_id,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+            input_ids = outputs["sequences"]
+            attention_mask = torch.cat([attention_mask, torch.ones(
+                bsz, 1, dtype=torch.long, device="cuda")], dim=-1)
+        return input_ids
+
     def get_logits(self, model, input_ids, attention_mask):
         return model(
             input_ids=input_ids,
@@ -427,7 +486,8 @@ class DistillTrainerCallback(TrainerCallback):
         if self.correct_cnt > 0:
             with open("out", "a") as f:
                 f.write(f"[{eval_cnt}] {self.correct_cnt}/{self.propose_cnt}\n")
-            wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+            wandb.log(
+                {"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
             wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
 
         eval_cnt += 1

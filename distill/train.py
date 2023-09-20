@@ -88,7 +88,7 @@ class TrainingArguments(transformers.TrainingArguments):
     sample_source: str = field(
         default="student",
         metadata = {
-            "choices" : ["student", "teacher", "mix"]
+            "choices" : ["student", "teacher", "mix_request", "mix_token"]
         }
     )
     kl_method: str = field(
