@@ -446,21 +446,22 @@ class DistillTrainer(Trainer):
         max_new_tokens,
         mix_ratio
     ):
-        bsz = input_ids.shape[0]
-        for i in range(max_new_tokens):
-            sample_model = student_model if random.random() < mix_ratio else teacher_model
-            outputs = sample_model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=1,
-                return_dict_in_generate=True,
-                pad_token_id=tokenizer.pad_token_id,
-                bos_token_id=tokenizer.bos_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-            input_ids = outputs["sequences"]
-            attention_mask = torch.cat([attention_mask, torch.ones(
-                bsz, 1, dtype=torch.long, device="cuda")], dim=-1)
+        with torch.no_grad():
+            bsz = input_ids.shape[0]
+            for i in range(max_new_tokens):
+                sample_model = student_model if random.random() < mix_ratio else teacher_model
+                outputs = sample_model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    max_new_tokens=1,
+                    return_dict_in_generate=True,
+                    pad_token_id=tokenizer.pad_token_id,
+                    bos_token_id=tokenizer.bos_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
+                input_ids = outputs["sequences"]
+                attention_mask = torch.cat([attention_mask, torch.ones(
+                    bsz, 1, dtype=torch.long, device="cuda")], dim=-1)
         return input_ids
 
     def get_logits(self, model, input_ids, attention_mask):
