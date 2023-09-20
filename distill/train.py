@@ -85,6 +85,18 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "parameter update interval for online training"
         }
     )
+    sample_source: str = field(
+        default="student",
+        metadata = {
+            "choices" : ["student", "teacher", "mix_request", "mix_token"]
+        }
+    )
+    kl_method: str = field(
+        default="forward",
+        metadata = {
+            "choices" : ["forward", "reverse", "jsd"]
+        }
+    )
 
 
 local_rank = None
@@ -146,9 +158,16 @@ def preprocess(
         conv = get_conversation_template(model)
         roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
 
+        assert len(sources) == 1
+        if do_eval:
+            content = ""
+        else:
+            assert len(sources[0]) == 2, f"{sources}"
+            content = sources[0][1]['content']
+            
         sources[0] = [
             {'role': 'user', 'content': sources[0][0]['content']},
-            {'role': 'assistant', 'content': ''}
+            {'role': 'assistant', 'content': content}
         ]
 
         # Apply prompt templates
@@ -171,6 +190,7 @@ def preprocess(
                 conversations,
                 return_tensors="pt"
             ).input_ids
+            targets = input_ids.clone()
         else:
             input_ids = tokenizer(
                 conversations,
@@ -179,12 +199,66 @@ def preprocess(
                 max_length=tokenizer.model_max_length,
                 truncation=True,
             ).input_ids
+            targets = input_ids.clone()
 
-        labels = input_ids.clone()    
+            # Mask targets. Only compute loss on the assistant outputs.
+            sep = conv.sep + conv.roles[1] + ": "
+            for conversation, target in zip(conversations, targets):
+                total_len = int(target.ne(tokenizer.pad_token_id).sum())
+                turns = conversation.split(conv.sep2)
+                cur_len = 1
+                target[:cur_len] = IGNORE_TOKEN_ID
+                for i, turn in enumerate(turns):
+                    if turn == "":
+                        break
+                    turn_len = len(tokenizer(turn).input_ids)
+
+                    parts = turn.split(sep)
+                    if len(parts) != 2:
+                        break
+                    parts[0] += sep
+                    # "-2" is hardcoded for the LLaMA tokenizer to make the offset correct.
+                    instruction_len = len(tokenizer(parts[0]).input_ids) - 2
+
+                    # Ignore the user instructions
+                    target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
+                    cur_len += turn_len
+
+                target[cur_len:] = IGNORE_TOKEN_ID
+
+                if False:  # Inspect and check the correctness of masking
+                    z = target.clone()
+                    z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
+                    print(tokenizer.decode(z))
+
+                if cur_len < tokenizer.model_max_length:
+                    if cur_len != total_len:
+                        target[:] = IGNORE_TOKEN_ID
+                        print(
+                            f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
+                            f" (ignored)"
+                        )
+
+        # generate prompt_ids
+        tokenizer.padding_side = "left"
+        conv = get_conversation_template(model)
+        conv.append_message(conv.roles[0], sources[0][0]['content'])
+        conv.append_message(conv.roles[1], "")
+        promt = conv.get_prompt()
+        prompts = tokenizer(
+            promt,
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+        )
+        tokenizer.padding_side = "right"
+        
         return dict(
             input_ids=input_ids,
-            labels=labels,
+            labels=targets,
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
+            prompt_ids=prompts["input_ids"],
+            prompt_attention_mask=prompts["attention_mask"]
         )
     else:
         raise NotImplementedError(
@@ -223,6 +297,8 @@ class LazySupervisedDataset(Dataset):
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
             attention_mask=ret["attention_mask"][0],
+            prompt_ids=ret["prompt_ids"][0],
+            prompt_attention_mask=ret["prompt_attention_mask"][0]
         )
         self.cached_data_dict[i] = ret
 
@@ -300,8 +376,7 @@ def train():
     else:
         teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
             model_args.teacher_model_path,
-            config=teacher_config,
-            torch_dtype=torch.bfloat16
+            config=teacher_config
         )
     teacher_model.cuda()
     print(
@@ -311,7 +386,7 @@ def train():
         model_args.teacher_model_path,
         cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
-        padding_side="left",
+        padding_side="right",
         use_fast=False,
     )
     tokenizer.pad_token = tokenizer.unk_token
