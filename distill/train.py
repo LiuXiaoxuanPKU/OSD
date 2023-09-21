@@ -354,6 +354,9 @@ def train():
 
     # Load model and tokenizer
     # student model
+    config.bos_token_id = 1
+    config.eos_token_id = 2
+    config.pad_token_id = 0
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.student_model_path,
         config=config,
