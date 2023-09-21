@@ -39,7 +39,9 @@ KL_METHOD_MAP = {
 }
 
 eval_cnt = 0
-
+import transformers
+copy_model = transformers.AutoModelForCausalLM.from_pretrained("JackFram/llama-160m")
+copy_model.cuda()
 
 class DistillTrainer(Trainer):
     def __init__(self, teacher_model, *args, **kwargs):
@@ -183,8 +185,9 @@ class DistillTrainer(Trainer):
                 student_token_ratio
             )
         elif sample_student:
+            copy_model.load_state_dict(model.state_dict())
             generated_ids, _ = self.get_generated_ids(
-                model,
+                copy_model,
                 self.tokenizer,
                 inputs["prompt_ids"],
                 inputs["prompt_attention_mask"],
@@ -196,17 +199,8 @@ class DistillTrainer(Trainer):
         
         # preparet attention_mask and output_mask
         if sample_mix_token or sample_student:
-            bsz, total_seq_len = generated_ids.shape
             prompt_len = inputs["prompt_ids"].shape[-1]
-            gen_len = total_seq_len - prompt_len
-            attention_mask = torch.cat(
-                [
-                    inputs["prompt_attention_mask"],
-                    torch.ones((bsz, gen_len), device="cuda",
-                               dtype=torch.long),
-                ],
-                dim=1,
-            )
+            attention_mask = generated_ids != self.tokenizer.pad_token_id
             output_mask = generated_ids[..., 1:] == self.tokenizer.pad_token_id
             # Ignore prompt when calculating loss
             output_mask[..., :prompt_len-1] = True
@@ -249,94 +243,6 @@ class DistillTrainer(Trainer):
             )
             loss = fwd_loss_ratio * fwd_loss + \
                 (1 - fwd_loss_ratio) * reverse_loss
-
-        if self.args.gradient_accumulation_steps > 1:
-            loss = loss / self.args.gradient_accumulation_steps
-
-        loss.backward()
-        return loss.detach()
-
-    def offline_training_step_old(self, model, inputs):
-        max_new_tokens = 128
-        temperature = 1
-        sample_source = SampleSource.Teacher
-        kl_method = "teacher_student"
-
-        # sample token ids
-        if sample_source == SampleSource.Student:
-            sample_model = model
-        elif sample_source == SampleSource.Teacher:
-            sample_model = self.teacher_model
-        elif sample_source == SampleSource.Mix:
-            l = random.random()
-            sample_model = model if l < 0.5 else self.teacher_model
-        else:
-            raise ValueError()
-
-        require_logits = True if sample_model == self.teacher_model else False
-        generated_ids, generated_logits = self.get_generated_ids(
-            sample_model,
-            self.tokenizer,
-            inputs["input_ids"],
-            inputs["attention_mask"],
-            max_new_tokens,
-            require_logits,
-        )
-
-        # prepare inputs for getting logits
-        bsz, total_seq_len = generated_ids.shape
-        gen_len = total_seq_len - inputs["input_ids"].shape[-1]
-        attention_mask = torch.cat(
-            [
-                inputs["attention_mask"],
-                torch.ones((bsz, gen_len), device="cuda", dtype=torch.long),
-            ],
-            dim=1,
-        )
-
-        # get student/teacher logits
-        student_logits = self.get_logits(model, generated_ids, attention_mask)[
-            :, -gen_len - 1: -1, :
-        ]
-        with torch.no_grad():
-            if generated_logits is not None:
-                teacher_logits = generated_logits
-            else:
-                teacher_logits = self.get_logits(
-                    self.teacher_model, generated_ids, attention_mask
-                )[:, -gen_len - 1: -1, :]
-
-        # calculate loss with kl divergence
-        output_mask = generated_ids[:, -
-                                    gen_len:] == self.tokenizer.pad_token_id
-        if kl_method == "teacher_student":
-            loss = self.soft_cross_entropy(
-                student_logits / temperature, teacher_logits / temperature, output_mask
-            )
-        elif kl_method == "student_teacher":
-            loss = self.get_kl(
-                teacher_logits / temperature, student_logits / temperature, output_mask
-            )
-        elif kl_method == "exact":
-            vocab_size = teacher_logits.shape[-1]
-            teacher_logits = teacher_logits.reshape(-1, vocab_size)
-            student_logits = student_logits.reshape(-1, vocab_size)
-            generated_ids = generated_ids[:, -gen_len:].reshape(-1, 1)
-            with torch.no_grad():
-                log_ratio = teacher_logits.log_softmax(-1).gather(
-                    -1, generated_ids
-                ) - student_logits.log_softmax(-1).gather(-1, generated_ids)
-                log_ratio = log_ratio.reshape(bsz, gen_len).sum(dim=1)[:, None]
-            cross_entropy = torch.nn.functional.cross_entropy(
-                student_logits / temperature,
-                generated_ids.squeeze(-1),
-                ignore_index=self.tokenizer.pad_token_id,
-                reduction="none",
-            ).reshape(bsz, gen_len)
-            loss = cross_entropy * (log_ratio - 1)
-            loss = (loss * (~output_mask)).sum() / (~output_mask).sum()
-        else:
-            raise NotImplementedError()
 
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
