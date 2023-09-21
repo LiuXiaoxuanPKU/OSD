@@ -101,14 +101,14 @@ def preprocess_function_generic(examples, tokenizer, args, prefix=""):
   padding = "max_length"
 
   # remove pairs where at least one record is None
-
   inputs, targets = [], []
   for i in range(len(examples[text_column])):
       if examples[text_column][i] and examples[summary_column][i]:
-          inputs.append(examples[text_column][i])
+          prompt = prefix + examples[text_column][i]
+          inputs.append(prompt)
           targets.append(examples[summary_column][i])
 
-  inputs = [prefix + inp for inp in inputs]
+  print(f'dataset length: {len(inputs)}')
   model_inputs = tokenizer(inputs, max_length=args.source_max_length, padding=padding, truncation=True, return_tensors="pt", )
 
   # Tokenize targets with the `text_target` keyword argument

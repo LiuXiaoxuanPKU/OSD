@@ -44,8 +44,8 @@ def is_correct(model_completion, gt_example):
     assert gt_answer != INVALID_ANS
     return extract_answer(model_completion) == gt_answer
 
-def preprocess_function_gsm8k(examples, tokenizer, args):
-    if args.debug:
+def preprocess_function_gsm8k(examples, tokenizer, args, train_args):
+    if train_args.debug:
         inputs = examples["question"][:3]
         targets = examples["answer"][:3]
     else:
@@ -83,6 +83,14 @@ def load_gsm8k(train_path: str = "./data/train.jsonl",
     test_data = datasets.Dataset.from_list(read_jsonl(test_path))
     return train_data, test_data
 
+def load_gsm8k_with_answers(train_path: str = "./data/train.jsonl"):
+    train_data = datasets.Dataset.from_list(read_jsonl(train_path))
+    return train_data
+
+def load_spider_with_answers(train_path: str = "./data/train.jsonl"):
+    train_data = datasets.Dataset.from_list(read_jsonl(train_path))
+    return train_data
+
 class GSMDataset(torch.utils.data.Dataset):
     def __init__(self, tokenizer, examples, loss_on_prefix=True):
         self.examples = examples
@@ -117,8 +125,8 @@ class GSMDataset(torch.utils.data.Dataset):
         return dict(input_ids=tokens, attention_mask=mask)
 
 # SPIDER dataset
-def preprocess_function_spider(examples, tokenizer, args, prefix="Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer."):
-    if args.debug:
+def preprocess_function_spider(examples, tokenizer, args, train_args, prefix="Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer."):
+    if train_args.debug:
         inputs = examples["question"][:3]
         targets = examples["query"][:3]
     else:
@@ -153,22 +161,20 @@ def preprocess_function_spider(examples, tokenizer, args, prefix="Could you tran
 
 
     # WMT16 EN-DE dataset
-def preprocess_function_ende(examples, tokenizer, args, prefix="translate English to German: "):
-    if args.debug:
-        example_text = examples['translation'][:2]
-        inputs = example_text['en']
-        targets = example_text["de"]
+def preprocess_function_ende(examples, tokenizer, args, train_args, prefix="translate English to German: "):
+    if train_args.debug:
+        all_text = examples['translation'][:2]
     else:
         all_text = examples['translation']
         
-        inputs = []
-        targets = []
-        for excerpt in all_text:
-            en_text = prefix + excerpt['en']
-            de_text = excerpt['de']
+    inputs = []
+    targets = []
+    for excerpt in all_text:
+        en_text = prefix + excerpt['en']
+        de_text = excerpt['de']
 
-            inputs.append(en_text)
-            targets.append(de_text)
+        inputs.append(en_text)
+        targets.append(de_text)
             
     padding = 'max_length'
     model_inputs = tokenizer(
