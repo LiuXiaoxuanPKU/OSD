@@ -1,6 +1,6 @@
 datapath=$1
 WANDB_PROJECT=specInfer python distill/train.py \
-    --student_model_path  JackFram/llama-160m \
+    --student_model_path  $datapath/llama-160m \
     --teacher_model_path $datapath/vicuna-7b-v1.3/ \
     --data_path data/gbharti_finance-alpaca_train_with_answer.json \
     --eval_data_path data/gbharti_finance-alpaca_eval.json \
@@ -28,7 +28,7 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --sample_source teacher \
     --kl_method forward
 
-mkdir output
-python distill/experiment/compare_model.py \
-       --data data/gbharti_finance-alpaca_eval.json \
-       --student $datapath/finance_teacher_fwd   > output/finance_teacher_fwd_acc.out
+# mkdir output
+# python distill/experiment/compare_model.py \
+#        --data data/gbharti_finance-alpaca_eval.json \
+#        --student $datapath/finance_teacher_fwd   > output/finance_teacher_fwd_acc.out
