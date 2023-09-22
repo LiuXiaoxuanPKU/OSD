@@ -1,29 +1,28 @@
+datapath=$1
 WANDB_PROJECT=specInfer python distill/train.py \
-    --student_model_path /rscratch/zhendong/lily/llama-160m \
-    --teacher_model_path /rscratch/zhendong/lily/vicuna-7b-v1.3/ \
-    --data_path data/sharp_mix.json \
+    --student_model_path JackFram/llama-160m \
+    --teacher_model_path $datapath/vicuna-7b-v1.3/ \
+    --data_path data/sharp.json \
     --max_propose_num 5 \
     --bf16 True \
-    --output_dir /rscratch/zhendong/lily/sharp_mix_online_interval1 \
+    --output_dir $datapath/sharp_online \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy "no" \
-    --save_strategy "steps" \
-    --save_steps 500 \
+    --save_strategy "epoch" \
     --save_total_limit 20 \
     --learning_rate 1e-5 \
     --weight_decay 0. \
-    --warmup_ratio 0.4 \
-    --lr_scheduler_type "cosine" \
+    --warmup_ratio 0. \
+    --lr_scheduler_type "constant" \
     --tf32 True \
-    --model_max_length 2048 \
+    --model_max_length 512 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name sharp_mix_online_interval1 \
+    --run_name sharp_online \
     --mode online \
-    --online_eval_interval 10 \
+    --online_eval_interval 1 \
     --online_update_interval 1 \
     --logging_steps 1 \
     --logging_nan_inf_filter true 
