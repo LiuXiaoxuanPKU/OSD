@@ -175,8 +175,9 @@ class DistillTrainer(Trainer):
 
         # sample tokens
         if sample_mix_token:
+            copy_model.load_state_dict(model.state_dict())
             generated_ids = self.get_mix_generated_ids(
-                model,
+                copy_model,
                 self.teacher_model,
                 self.tokenizer,
                 inputs["prompt_ids"],
@@ -184,6 +185,7 @@ class DistillTrainer(Trainer):
                 max_new_tokens,
                 student_token_ratio
             )
+            generated_ids = generated_ids.clone().detach()
         elif sample_student:
             copy_model.load_state_dict(model.state_dict())
             generated_ids, _ = self.get_generated_ids(
@@ -194,6 +196,7 @@ class DistillTrainer(Trainer):
                 max_new_tokens,
                 False,
             )
+            generated_ids = generated_ids.clone().detach()
         else:
             generated_ids = inputs["input_ids"]
         
@@ -314,6 +317,7 @@ class DistillTrainer(Trainer):
         mean_output = output.sum() / (~padding_mask).sum()
         return mean_output
 
+    @torch.inference_mode()
     def get_generated_ids(
         self,
         model,
@@ -323,25 +327,25 @@ class DistillTrainer(Trainer):
         max_new_tokens,
         require_logits,
     ):
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                output_scores=require_logits,
-                return_dict_in_generate=True,
-                pad_token_id=tokenizer.pad_token_id,
-                bos_token_id=tokenizer.bos_token_id,
-                eos_token_id=tokenizer.eos_token_id,
+        outputs = model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=max_new_tokens,
+            output_scores=require_logits,
+            return_dict_in_generate=True,
+            pad_token_id=tokenizer.pad_token_id,
+            bos_token_id=tokenizer.bos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+        if require_logits:
+            logits = torch.cat(
+                [score.unsqueeze(1) for score in outputs["scores"]], dim=1
             )
-            if require_logits:
-                logits = torch.cat(
-                    [score.unsqueeze(1) for score in outputs["scores"]], dim=1
-                )
-            else:
-                logits = None
-            return outputs["sequences"], logits
+        else:
+            logits = None
+        return outputs["sequences"], logits
 
+    @torch.inference_mode()
     def get_mix_generated_ids(
         self,
         student_model,
@@ -352,23 +356,61 @@ class DistillTrainer(Trainer):
         max_new_tokens,
         mix_ratio
     ):
-        with torch.no_grad():
-            bsz = input_ids.shape[0]
-            for i in range(max_new_tokens):
-                sample_model = student_model if random.random() < mix_ratio else teacher_model
-                outputs = sample_model.generate(
+        org_input_ids = input_ids.clone()
+        def sample_token_from_logits(logits):
+            tau = 0.001 # argmax
+            distribution = torch.softmax(logits / tau, dim=-1)
+            next_token_id = torch.multinomial(distribution, num_samples=1)
+            return next_token_id
+    
+        def generate_one(model, input_ids, attention_mask, past_key_values):
+            if past_key_values is None:
+                outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    max_new_tokens=1,
-                    return_dict_in_generate=True,
-                    pad_token_id=tokenizer.pad_token_id,
-                    bos_token_id=tokenizer.bos_token_id,
-                    eos_token_id=tokenizer.eos_token_id,
+                    return_dict=True,
                 )
-                input_ids = outputs["sequences"]
-                attention_mask = torch.cat([attention_mask, torch.ones(
-                    bsz, 1, dtype=torch.long, device="cuda")], dim=-1)
-        return input_ids
+            else:
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    return_dict=True,
+                    use_cache=True,
+                    past_key_values=past_key_values,
+                )
+            past_key_values = outputs.past_key_values
+            next_token = sample_token_from_logits(outputs.logits[:, -1, :])
+            return next_token, past_key_values
+
+        bsz, prompt_len = input_ids.shape
+        # always generate the first token for teacher/student to get the kv cache
+        student_first_token, student_key_values = generate_one(
+            student_model, input_ids, attention_mask, None)
+        teacher_first_token, teacher_key_values = generate_one(
+            teacher_model, input_ids, attention_mask, None)
+        
+        torch.manual_seed(1)
+        input_ids = student_first_token if random.random() < mix_ratio else teacher_first_token
+        attention_mask = torch.cat([attention_mask, torch.ones(
+                bsz, 1, dtype=torch.long, device='cuda')], dim=1)
+
+        for i in range(max_new_tokens - 1):
+            sample_model, past_key_values = (student_model, student_key_values) if random.random(
+            ) < mix_ratio else (teacher_model, teacher_key_values)
+            next_token, _ = generate_one(sample_model, input_ids, 
+                                        attention_mask, past_key_values)
+            input_ids = torch.cat([input_ids, next_token], dim=-1)
+            attention_mask = torch.cat([attention_mask, torch.ones(
+                bsz, 1, dtype=torch.long, device='cuda')], dim=1)
+
+        # mask eos
+        eos_positions = (input_ids == tokenizer.eos_token_id).nonzero(as_tuple=True)
+        mask = torch.zeros_like(input_ids, dtype=torch.bool)
+        for row, col in zip(*eos_positions):
+            mask[row, col+1:] = True
+        input_ids[mask] = tokenizer.pad_token_id
+        return torch.cat((org_input_ids, input_ids), dim=-1).cuda()
+
 
     def get_logits(self, model, input_ids, attention_mask):
         return model(
