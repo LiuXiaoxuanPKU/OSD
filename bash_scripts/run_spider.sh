@@ -1,3 +1,0 @@
-bash bash_scripts/run_spider_mix_fwd.sh
-bash bash_scripts/run_spider_teacher_fwd.sh
-bash bash_scripts/run_spider_student_fwd.sh

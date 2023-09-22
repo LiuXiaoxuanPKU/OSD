@@ -1,10 +1,10 @@
 WANDB_PROJECT=specInfer python distill/train.py \
-    --student_model_path /rscratch/zhendong/lily/llama160m_spider_offline \
-    --teacher_model_path /rscratch/zhendong/lily/vicuna-7b-v1.3/ \
+    --student_model_path /data/spider_teacher_fwd/\
+    --teacher_model_path /data/vicuna-7b-v1.3/ \
     --data_path data/sharp_mix.json \
     --max_propose_num 5 \
     --bf16 True \
-    --output_dir /rscratch/zhendong/lily/sharp_shift \
+    --output_dir /data/sharp_shift \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
@@ -13,15 +13,14 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --save_strategy "no" \
     --learning_rate 1e-5 \
     --weight_decay 0. \
-    --warmup_ratio 0.1 \
-    --lr_scheduler_type "cosine" \
+    --lr_scheduler_type "constant" \
     --tf32 True \
-    --model_max_length 2048 \
+    --model_max_length 512 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
     --run_name eval_sharp_shift \
     --mode online \
-    --online_eval_interval 10 \
+    --online_eval_interval 1 \
     --online_update_interval 1 \
     --logging_steps 1 \
     --logging_nan_inf_filter true

@@ -5,11 +5,11 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --eval_data_path data/spider_validation.json \
     --max_propose_num 5 \
     --bf16 True \
-    --output_dir /data/spider_mix_fwd \
+    --output_dir /data/spider_student_jsd \
     --num_train_epochs 2 \
-    --per_device_train_batch_size 8 \
-    --gradient_accumulation_steps 16 \
-    --evaluation_strategy "no" \
+    --per_device_train_batch_size 32 \
+    --gradient_accumulation_steps 4 \
+    --evaluation_strategy "epoch" \
     --save_strategy "steps" \
     --save_steps 30 \
     --save_total_limit 100 \
@@ -19,14 +19,15 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --tf32 True \
-    --model_max_length 2048 \
+    --model_max_length 256 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name spider_mix_fwd \
+    --run_name spider_student_jsd \
     --mode offline \
-    --sample_source mix \
-    --kl_method forward
+    --sample_source student \
+    --kl_method jsd
 
+mkdir output
 python distill/experiment/compare_model.py \
        --data /home/lily/spec_new/data/spider_validation.json \
-       --student /data/spider_mix_fwd > mix_acc.out
+       --student /data/spider_student_jsd  > output/spider_student_jsd_acc.out

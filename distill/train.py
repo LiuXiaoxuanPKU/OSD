@@ -162,8 +162,10 @@ def preprocess(
         if do_eval:
             content = ""
         else:
-            assert len(sources[0]) == 2, f"{sources}"
-            content = sources[0][1]['content']
+            if len(sources[0]) == 1:
+                content = ""
+            else:
+                content = sources[0][1]['content']
             
         sources[0] = [
             {'role': 'user', 'content': sources[0][0]['content']},
