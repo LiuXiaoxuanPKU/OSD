@@ -1,3 +1,4 @@
+datapath=$1
 WANDB_PROJECT=specInfer python distill/train.py \
     --student_model_path  JackFram/llama-160m \
     --student_model_path $datapath/vicuna-7b-v1.3/ \
