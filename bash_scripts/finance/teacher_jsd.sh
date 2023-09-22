@@ -1,10 +1,11 @@
+datapath=$1
 WANDB_PROJECT=specInfer python distill/train.py \
     --student_model_path  JackFram/llama-160m \
-    --teacher_model_path /data/vicuna-7b-v1.3/ \
+    --teacher_model_path $datapath/vicuna-7b-v1.3/ \
     --data_path data/gbharti_finance-alpaca_train_with_answer.json \
     --eval_data_path data/gbharti_finance-alpaca_eval.json \
     --bf16 True \
-    --output_dir /data/finance_teacher_jsd \
+    --output_dir $datapath/finance_teacher_jsd \
     --num_train_epochs 2 \
     --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 1 \
@@ -29,5 +30,5 @@ WANDB_PROJECT=specInfer python distill/train.py \
 
 mkdir output
 python distill/experiment/compare_model.py \
-       --data /home/lily/spec_new/data/gbharti_finance-alpaca_eval.json \
-       --student /data/finance_teacher_jsd   > output/finance_teacher_jsd_acc.out
+       --data data/gbharti_finance-alpaca_eval.json \
+       --student $datapath/finance_teacher_jsd   > output/finance_teacher_jsd_acc.out
