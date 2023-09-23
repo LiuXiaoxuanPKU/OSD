@@ -6,7 +6,7 @@ import random
 DATASET_NAMES = {
     "spider" : "spider_train.json",
     "gsm8k" : "gsm8k_train.json",
-    "finance" : "gbharti_finance-alpaca_train_with_answer.json"
+    "finance" : "gbharti_finance-alpaca_train.json"
 }
 
 def run_cmd(cmd):
@@ -48,10 +48,10 @@ def sample_cases(cases, total_size):
     return sampled
         
 if __name__ == "__main__":
-    datasets = ["spider", "gsm8k", "finance"]
+    datasets = ["gsm8k", "spider", "finance"]
     cases = []
     for dataset in datasets:
-        run_cmd(f"python clean_{dataset}.py")
+        # run_cmd(f"python clean_{dataset}.py")
         cases.append(load_case(dataset))
 
     total_size = 6000
