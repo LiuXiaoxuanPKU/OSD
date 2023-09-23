@@ -112,7 +112,7 @@ class DistillTrainer(Trainer):
         self.sample_steps.append(output.sample_steps)
 
         if self.train_step_cnt % self.online_eval_interval == 0:
-            window_size = 10
+            window_size = 1
             avg_alpha = (
                 sum(self.alphas[-window_size:])
                 * 1.0
@@ -308,10 +308,10 @@ class DistillTrainer(Trainer):
         return mean_entropy
 
     def get_kl(self, predicts, targets, padding_mask):
-        kl_loss = torch.nn.KLDivLoss(reduction="none")
-        predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
-        targets_prob = torch.nn.functional.softmax(targets, dim=-1)
-        output = kl_loss(predict_log_prob, targets_prob)
+        kl_loss = torch.nn.KLDivLoss(reduction="none", log_target=True)
+        predict_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
+        targets_prob = torch.nn.functional.log_softmax(targets, dim=-1)
+        output = kl_loss(predict_prob, targets_prob)
         expand_mask = padding_mask.unsqueeze(-1).expand_as(output)
         output.masked_fill_(expand_mask, 0)
         mean_output = output.sum() / (~padding_mask).sum()
