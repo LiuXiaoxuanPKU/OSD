@@ -1,9 +1,13 @@
 datapath=$1
-bash bash_scripts/spider/mixtoken_fwd.sh $datapath
-bash bash_scripts/spider/mixrequest_fwd.sh $datapath
-bash bash_scripts/spider/student_reverse.sh $datapath
-bash bash_scripts/spider/teacher_reverse.sh $datapath
-bash bash_scripts/spider/teacher_jsd.sh $datapath
-bash bash_scripts/spider/student_jsd.sh $datapath
-bash bash_scripts/spider/student_fwd.sh $datapath
-bash bash_scripts/spider/teacher_fwd.sh $datapath
+bash bash_scripts/spider/online.sh $datapath
+bash bash_scripts/spider/offline.sh $datapath teacher forward
+bash bash_scripts/spider/offline.sh $datapath student forward
+bash bash_scripts/spider/offline.sh $datapath teacher reverse
+bash bash_scripts/spider/offline.sh $datapath student reverse
+bash bash_scripts/spider/offline.sh $datapath jsd forward
+bash bash_scripts/spider/offline.sh $datapath jsd reverse
+bash bash_scripts/spider/offline.sh $datapath teacher mix_token
+bash bash_scripts/spider/offline.sh $datapath teacher mix_request
+bash bash_scripts/spider/offline.sh $datapath student mix_token
+bash bash_scripts/spider/offline.sh $datapath student mix_request
+
