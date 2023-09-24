@@ -59,6 +59,8 @@ class DistillTrainer(Trainer):
         self.online_update_interval = args.online_update_interval
         self.buffer = []
         self.alphas = []
+        self.alphas_by_dataset = {}
+        self.alphas_by_language = {}
         self.sample_steps = []
 
         self.sample_source = SAMPLE_SOURCE_MAP[args.sample_source]
@@ -107,9 +109,28 @@ class DistillTrainer(Trainer):
         wrong_token_ids = [
             input_ids.shape[-1] + t for t in output.wrong_token_ids
         ]
-        self.buffer.append((token_ids, wrong_token_ids))
+        if "dataset" in inputs:
+            if inputs["dataset"] not in self.alphas_by_dataset:
+                 self.alphas_by_dataset[inputs["dataset"]] = []
+            if self.train_step_cnt <= 2000:
+                if inputs["dataset"] == "gsm8k":
+                    self.buffer.append((token_ids, wrong_token_ids))
+            else:
+                if inputs["dataset"] == "finance":
+                    self.buffer.append((token_ids, wrong_token_ids))
+        else:
+            self.buffer.append((token_ids, wrong_token_ids))
+        
+        
         self.alphas.append(output.alpha_sum)
         self.sample_steps.append(output.sample_steps)
+        if "dataset" in inputs:
+             self.alphas_by_dataset[inputs["dataset"]].append(output.alpha_sum * 1.0 / output.sample_steps)
+        elif "language" in inputs:
+            language = inputs["language"][0]
+            if language not in self.alphas_by_language:
+                self.alphas_by_language[language] = []
+            self.alphas_by_language[language].append(output.alpha_sum*1.0/output.sample_steps)
 
         if self.train_step_cnt % self.online_eval_interval == 0:
             window_size = 1
@@ -119,7 +140,12 @@ class DistillTrainer(Trainer):
                 / sum(self.sample_steps[-window_size:])
             )
             wandb.log({"alpha": avg_alpha})
-
+            if "dataset" in inputs:
+                wandb.log({f"alpha_{inputs['dataset']}": self.alphas_by_dataset[inputs["dataset"]][-1]})
+            elif "language" in inputs:
+                language_alpha = self.alphas_by_language[language][-1] 
+                wandb.log({f"alpha_{language}": language_alpha})
+                
         if len(self.buffer) >= self.online_update_interval:
             self.model.train()  # switch back to training mode
 
