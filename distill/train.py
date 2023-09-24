@@ -295,13 +295,32 @@ class LazySupervisedDataset(Dataset):
                          self.tokenizer,
                          self.model,
                          self.do_eval)
-        ret = dict(
-            input_ids=ret["input_ids"][0],
-            labels=ret["labels"][0],
-            attention_mask=ret["attention_mask"][0],
-            prompt_ids=ret["prompt_ids"][0],
-            prompt_attention_mask=ret["prompt_attention_mask"][0]
-        )
+        if "language" in self.raw_data[i]:
+            ret = dict(
+                input_ids=ret["input_ids"][0],
+                labels=ret["labels"][0],
+                attention_mask=ret["attention_mask"][0],
+                prompt_ids=ret["prompt_ids"][0],
+                prompt_attention_mask=ret["prompt_attention_mask"][0],
+                language=self.raw_data[i]["language"]
+            )
+        elif "dataset" in self.raw_data[i]:
+            ret = dict(
+                input_ids=ret["input_ids"][0],
+                labels=ret["labels"][0],
+                attention_mask=ret["attention_mask"][0],
+                prompt_ids=ret["prompt_ids"][0],
+                prompt_attention_mask=ret["prompt_attention_mask"][0],
+                dataset=self.raw_data[i]["dataset"]
+            )
+        else:
+            ret = dict(
+                input_ids=ret["input_ids"][0],
+                labels=ret["labels"][0],
+                attention_mask=ret["attention_mask"][0],
+                prompt_ids=ret["prompt_ids"][0],
+                prompt_attention_mask=ret["prompt_attention_mask"][0]
+            )
         self.cached_data_dict[i] = ret
 
         return ret
