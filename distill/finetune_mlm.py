@@ -259,7 +259,7 @@ def train():
     global preprocess_function_gsm8k
     global preprocess_function_spider
     if data_args.dataset_name == 'xsum':
-        train_dataset = Xsum_Dataset(split='train', source_length=data_args.source_max_length, target_length=data_args.train_target_max_length).dataset
+        train_dataset = Xsum_Dataset(split = 'train', source_length=data_args.source_max_length, target_length=data_args.train_target_max_length).dataset
         eval_dataset = Xsum_Dataset(split='validation', source_length=data_args.source_max_length, target_length=data_args.val_target_max_length).dataset
         predict_dataset = Xsum_Dataset(split='test', source_length=data_args.source_max_length, target_length=data_args.test_target_max_length).dataset
     elif data_args.dataset_name == 'wikihow':
@@ -333,16 +333,28 @@ def train():
         'python_with_answers',
         'finance_with_answers',
     ]
-    if data_args.dataset_name in require_val_tasks and training_args.do_train and training_args.do_eval:
-        # take 1/5 of training set to be evaluation dataset
-        train_indices = range(len(train_dataset)//5 * 4)
-        eval_indices = range(len(train_dataset)//5 * 4, len(train_dataset))
+    if data_args.dataset_name in require_val_tasks:
+        if training_args.do_predict:
+            # take 1/5 of training set to be evaluation dataset
+            train_indices = range(len(train_dataset)//5 * 4)
+            predict_indices = range(len(train_dataset)//5 * 4, len(train_dataset))
 
-        eval_dataset = datasets.Dataset.from_dict(train_dataset[eval_indices])  
-        train_dataset = datasets.Dataset.from_dict(train_dataset[train_indices])
+            predict_dataset = datasets.Dataset.from_dict(train_dataset[predict_indices])  
+            train_dataset = datasets.Dataset.from_dict(train_dataset[train_indices])
 
-        print('train dataset size: {}'.format(len(train_dataset)))
-        print('eval dataset size: {}'.format(len(eval_dataset)))
+            print('train dataset size: {}'.format(len(train_dataset)))
+            print('predict dataset size: {}'.format(len(predict_dataset)))
+        
+        if training_args.do_train and training_args.do_eval:
+            # take 1/5 of training set to be evaluation dataset
+            train_indices = range(len(train_dataset)//5 * 4)
+            eval_indices = range(len(train_dataset)//5 * 4, len(train_dataset))
+
+            eval_dataset = datasets.Dataset.from_dict(train_dataset[eval_indices])  
+            train_dataset = datasets.Dataset.from_dict(train_dataset[train_indices])
+
+            print('train dataset size: {}'.format(len(train_dataset)))
+            print('eval dataset size: {}'.format(len(eval_dataset)))
 
     num_proc = 16
     # Preprocessing the datasets for summarization tasks.
@@ -403,7 +415,7 @@ def train():
 
     # data partitioning
     if data_args.fast_eval:
-        #train_random_indices = random.sample(range(len(train_dataset)), len(train_dataset))
+        #train_random_indices = tuple(random.sample(range(len(train_dataset)), len(train_dataset)))
         #train_dataset = datasets.Dataset.from_dict(train_dataset[train_random_indices])
         
         if training_args.do_eval:
@@ -501,7 +513,7 @@ def train():
     
     trainer = Seq2SeqDistillTrainer(
             model=model, 
-            teacher_model=teacher_model, 
+            teacher_model=teacher_model,
             tokenizer=tokenizer, 
             train_dataset=train_dataset if training_args.do_train else None,
             eval_dataset=eval_dataset if training_args.do_eval else None,

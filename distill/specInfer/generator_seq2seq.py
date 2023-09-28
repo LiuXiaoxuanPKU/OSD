@@ -40,6 +40,10 @@ class Seq2SeqGenerator(Generator):
     def generate(self, input_ids, attention_mask, max_tokens, labels=None, temperature=0.01):
         def sample_method(logits):
             return torch.softmax(logits / temperature, dim=-1)
+        
+        # make sure all models are in the inference mode
+        self.model.eval()
+        self.proposer.model.eval()
 
         generated_token_cnt = 0
         generated_tokens = None

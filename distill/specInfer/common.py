@@ -109,11 +109,8 @@ def sychronize_time():
 # convert a list of 1d tensors to a single 2d tensor
 # if those 1d tensors have different shapes, pad them to the longest length
 def pad_to_2d(tensor_list, pad_token_id):
-    if not isinstance(tensor_list[0], torch.Tensor):
-        tensor_list = [torch.tensor(t).reshape(1, -1) for t in tensor_list]
-    max_len = max([t.shape[-1] for t in tensor_list])
-    assert max_len > 0
-    
+    max_len = max(tensor.shape[-1] for tensor in tensor_list)
+
     # Pad each tensor to the max length and stack them to form a 2D tensor
     result = torch.cat(
         [

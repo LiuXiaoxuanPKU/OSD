@@ -118,6 +118,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 max_new_tokens,
                 student_token_ratio
             )
+            generated_ids = generated_ids.clone().detach()
         elif sample_student:
             generated_ids, _ = self.get_generated_ids(
                 model,
@@ -127,6 +128,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 max_new_tokens,
                 False,
             )
+            generated_ids = generated_ids.clone().detach()
         else:
             generated_ids = inputs["decoder_input_ids"]
         
@@ -186,6 +188,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         max_new_tokens = 128
         max_new_decoder_tokens = 32
         temperature = 1
+
         sample_source = SampleSource.Teacher
         kl_method = "teacher_student"
 
@@ -295,17 +298,17 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             print(output.sample_steps)
             print("------")
         
-        #token_ids = torch.cat([decoder_inputs_ids, output.generated_ids], dim=-1)
-        token_ids = output.generated_ids
+        # token_ids = output.generated_ids
+        token_ids = torch.cat([decoder_inputs_ids, output.generated_ids], dim=-1)
         wrong_token_ids = [
             decoder_inputs_ids.shape[-1] + t for t in output.wrong_token_ids
         ]
-        self.buffer.append((token_ids, wrong_token_ids))
+        self.buffer.append((token_ids, wrong_token_ids, input_ids))
         self.alphas.append(output.alpha_sum)
         self.sample_steps.append(output.sample_steps)
 
         if self.train_step_cnt % self.online_eval_interval == 0:
-            window_size = 10
+            window_size = 1
             avg_alpha = (
                 sum(self.alphas[-window_size:])
                 * 1.0
@@ -319,23 +322,30 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             self.model.train()  # switch back to training mode
 
             decoder_inputs_ids = pad_to_2d([x[0] for x in self.buffer], 0)
+            input_ids = pad_to_2d([x[2] for x in self.buffer], 0)
             student_logits = self.get_logits(
-                model, input_ids, attention_mask, decoder_inputs_ids
+                model, input_ids, torch.ones_like(input_ids), decoder_inputs_ids
             )
             # generate teacher logits as the label
             # TODO: we can avoid this forward by getting logits during speculative decoding
             with torch.no_grad():
                 teacher_logits = self.get_logits(
-                    self.teacher_model, input_ids, attention_mask, decoder_inputs_ids
+                    self.teacher_model, input_ids, torch.ones_like(input_ids), decoder_inputs_ids
                 )
 
             # only compute loss at wrong predictions
-            mask = torch.ones_like(decoder_inputs_ids, dtype=torch.bool)
-            for i, data in enumerate(self.buffer):
-                cur_wrong_token_ids = data[1]
-                mask[i, cur_wrong_token_ids] = False
+            #mask = torch.ones_like(decoder_inputs_ids, dtype=torch.bool)
+            #for i, data in enumerate(self.buffer):
+            #    cur_wrong_token_ids = data[1]
+            #    mask[i, cur_wrong_token_ids] = False
+            #mask = mask[..., 1:]
 
-            loss = self.soft_cross_entropy(student_logits.float(), teacher_logits.float(), mask)
+            student_logits = student_logits.float()
+            teacher_logits = teacher_logits.float()
+ 
+            mask = decoder_inputs_ids == self.tokenizer.pad_token_id
+            
+            loss = self.soft_cross_entropy(student_logits, teacher_logits, mask)
             loss.backward()
             self.buffer = []
             return loss.detach()
@@ -376,15 +386,16 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         return mean_entropy
 
     def get_kl(self, predicts, targets, padding_mask):
-        kl_loss = torch.nn.KLDivLoss(reduction="none")
-        predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
-        targets_prob = torch.nn.functional.softmax(targets, dim=-1)
-        output = kl_loss(predict_log_prob, targets_prob)
+        kl_loss = torch.nn.KLDivLoss(reduction="none", log_target=True)
+        predict_prob = torch.nn.functional.log_softmax(predicts, dim=-1)
+        targets_prob = torch.nn.functional.log_softmax(targets, dim=-1)
+        output = kl_loss(predict_prob, targets_prob)
         expand_mask = padding_mask.unsqueeze(-1).expand_as(output)
         output.masked_fill_(expand_mask, 0)
         mean_output = output.sum() / (~padding_mask).sum()
         return mean_output
 
+    @torch.inference_mode()
     def get_generated_ids(
         self,
         model,
@@ -395,7 +406,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         require_logits,
     ):
         with torch.no_grad():
-            if isinstance(model, torch.nn.parallel.DistributedDataParallel) or isinstance(sample_model, torch.nn.DataParallel):
+            if isinstance(model, torch.nn.parallel.DistributedDataParallel) or isinstance(model, torch.nn.DataParallel):
                 outputs = model.module.generate(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -425,6 +436,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 logits = None
             return outputs["sequences"], logits
 
+    @torch.inference_mode()
     def get_mix_generated_ids(
         self,
         student_model,
@@ -482,6 +494,8 @@ class Seq2SeqDistillTrainerCallback(TrainerCallback):
         self.alpha = 0
         self.sample_steps = 0
 
+        self.predict_step = 0
+
     def on_evaluate(self, args, state, control, **kwargs):
         if args.local_rank == 0:
             print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
@@ -506,10 +520,10 @@ class Seq2SeqDistillTrainerCallback(TrainerCallback):
     
     def on_predict(self, args, state, control, **kwargs):
         if args.local_rank == 0:
-            print(f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}")
+            print(f"[{self.predict_step}] {self.correct_cnt}/{self.propose_cnt}")
             with open("out", "a") as f:
                 f.write(
-                    f"[{self.eval_step}] {self.correct_cnt}/{self.propose_cnt}\n")
+                    f"[{self.predict_step}] {self.correct_cnt}/{self.propose_cnt}\n")
             
             print(f"generated_token: {self.correct_cnt * 1.0 / self.propose_cnt}")
             print(f"alpha: {self.alpha * 1.0 / self.sample_steps}")
@@ -519,7 +533,7 @@ class Seq2SeqDistillTrainerCallback(TrainerCallback):
                 wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
                 wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
 
-        self.eval_step += 1
+        self.predict_step += 1
         self.correct_cnt = 0
         self.propose_cnt = 0
 

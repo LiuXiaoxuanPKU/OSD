@@ -91,6 +91,14 @@ def load_spider_with_answers(train_path: str = "./data/train.jsonl"):
     train_data = datasets.Dataset.from_list(read_jsonl(train_path))
     return train_data
 
+def load_finance_with_answers(train_path: str = "./data/train.jsonl"):
+    train_data = datasets.Dataset.from_list(read_jsonl(train_path))
+    return train_data
+
+def load_python_with_answers(train_path: str = "./data/train.jsonl"):
+    train_data = datasets.Dataset.from_list(read_jsonl(train_path))
+    return train_data
+
 class GSMDataset(torch.utils.data.Dataset):
     def __init__(self, tokenizer, examples, loss_on_prefix=True):
         self.examples = examples
@@ -125,7 +133,8 @@ class GSMDataset(torch.utils.data.Dataset):
         return dict(input_ids=tokens, attention_mask=mask)
 
 # SPIDER dataset
-def preprocess_function_spider(examples, tokenizer, args, train_args, prefix="Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer."):
+def preprocess_function_spider(examples, tokenizer, args, train_args, prefix=""):
+    # prefix="Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer."
     if train_args.debug:
         inputs = examples["question"][:3]
         targets = examples["query"][:3]
@@ -160,7 +169,7 @@ def preprocess_function_spider(examples, tokenizer, args, train_args, prefix="Co
     return model_inputs
 
 
-    # WMT16 EN-DE dataset
+# WMT16 EN-DE dataset
 def preprocess_function_ende(examples, tokenizer, args, train_args, prefix="translate English to German: "):
     if train_args.debug:
         all_text = examples['translation'][:2]
@@ -176,6 +185,111 @@ def preprocess_function_ende(examples, tokenizer, args, train_args, prefix="tran
         inputs.append(en_text)
         targets.append(de_text)
             
+    padding = 'max_length'
+    model_inputs = tokenizer(
+        inputs,
+        max_length=args.source_max_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+    # Tokenize targets with the `text_target` keyword argument
+    labels = tokenizer(
+        text_target=targets,
+        max_length=args.train_target_max_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    if padding == "max_length":
+                labels["input_ids"] = [
+                    [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+                ]
+
+    model_inputs["labels"] = labels["input_ids"]
+    model_inputs["decoder_attention_mask"] = labels["attention_mask"]
+    return model_inputs
+
+#  Code-seach python dataset
+def preprocess_function_python(examples, tokenizer, args, train_args, prefix=""):
+    if train_args.debug:
+        inputs = examples["func_documentation_string"][:3]
+        targets = examples["func_code_string"][:3]
+    else:
+        inputs = examples["func_documentation_string"]
+        inputs = [prefix + inp for inp in inputs]
+        targets = examples["func_code_string"]
+    padding = 'max_length'
+    model_inputs = tokenizer(
+        inputs,
+        max_length=args.source_max_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+    # Tokenize targets with the `text_target` keyword argument
+    labels = tokenizer(
+        text_target=targets,
+        max_length=args.train_target_max_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    if padding == "max_length":
+                labels["input_ids"] = [
+                    [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+                ]
+
+    model_inputs["labels"] = labels["input_ids"]
+    model_inputs["decoder_attention_mask"] = labels["attention_mask"]
+    return model_inputs
+
+# Finance-Alpaca dataset
+def preprocess_function_finance(examples, tokenizer, args, train_args, prefix=""):
+    if train_args.debug:
+        inputs = examples["instruction"][:3]
+        targets = examples["output"][:3]
+    else:
+        inputs = examples["instruction"]
+        inputs = [prefix + inp for inp in inputs]
+        targets = examples["output"]
+    padding = 'max_length'
+    model_inputs = tokenizer(
+        inputs,
+        max_length=args.source_max_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+    # Tokenize targets with the `text_target` keyword argument
+    labels = tokenizer(
+        text_target=targets,
+        max_length=args.train_target_max_length,
+        padding=padding,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    if padding == "max_length":
+                labels["input_ids"] = [
+                    [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
+                ]
+
+    model_inputs["labels"] = labels["input_ids"]
+    model_inputs["decoder_attention_mask"] = labels["attention_mask"]
+    return model_inputs
+
+# code-search python dataset
+def preprocess_function_python(examples, tokenizer, args, train_args, prefix=""):
+    if train_args.debug:
+        inputs = examples["func_documentation_string"][:3]
+        targets = examples["func_code_string"][:3]
+    else:
+        inputs = examples["func_documentation_string"]
+        inputs = [prefix + inp for inp in inputs]
+        targets = examples["func_code_string"]
     padding = 'max_length'
     model_inputs = tokenizer(
         inputs,

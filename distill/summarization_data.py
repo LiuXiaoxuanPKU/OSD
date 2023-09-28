@@ -48,7 +48,6 @@ class Wikihow_Dataset(torch.utils.data.Dataset):
 
 
 # Xsum Dataset
-
 class Xsum_Dataset(torch.utils.data.Dataset):
   
   def __init__(self, split, source_length, target_length) -> None:
