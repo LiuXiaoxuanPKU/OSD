@@ -271,15 +271,39 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         assert (
             self.args.gradient_accumulation_steps == 1
         ), f"Does not support grad_acc > 1 in online setting, grad_acc: {self.args.gradient_accumulation_steps}"
+        
+        # --------------------------------------------------------------------- #
+        student_temperature = 1.0
+        teacher_temperature = 1.0
 
+        if self.sample_source == SampleSource.MixRequest:
+            student_request_ratio = 0.5
+        
+        if self.sample_source == SampleSource.MixToken:
+            student_token_ratio = 0.5
+
+        if self.kl_method == KLMethod.JSD:
+            fwd_loss_ratio = 0.9
+
+        sample_mix_token = False
+        # sample token ids
+        if self.sample_source == SampleSource.Teacher:
+            sample_student = False
+        elif self.sample_source == SampleSource.Student:
+            sample_student = True
+        elif self.sample_source == SampleSource.MixRequest:
+            sample_student = True if random.random() < student_request_ratio else False
+        elif self.sample_source == SampleSource.MixToken:
+            sample_mix_token = True
+        # --------------------------------------------------------------------- #
+        
         # remove any masking
         input_ids =  inputs["input_ids"]
         # use speculative decoding to generate tokens
         attention_mask = inputs["attention_mask"]
         decoder_inputs_ids = inputs["decoder_input_ids"]
         output = self.generator.generate(input_ids, attention_mask,
-                                         max_new_tokens)
-        
+                                         max_new_tokens) 
         debug = False
         if debug:
             ref_generated = self.get_generated_ids(self.teacher_model, 
@@ -298,12 +322,13 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             print(output.sample_steps)
             print("------")
         
-        # token_ids = output.generated_ids
+        generated_ids = output.genreated_ids.clone().detach()
+        student_decoder_ids = output.student_generated_ids.clone().detach()
         token_ids = torch.cat([decoder_inputs_ids, output.generated_ids], dim=-1)
         wrong_token_ids = [
             decoder_inputs_ids.shape[-1] + t for t in output.wrong_token_ids
         ]
-        self.buffer.append((token_ids, wrong_token_ids, input_ids))
+        self.buffer.append((token_ids, wrong_token_ids, input_ids, student_decoder_ids))
         self.alphas.append(output.alpha_sum)
         self.sample_steps.append(output.sample_steps)
 
@@ -321,8 +346,12 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         if len(self.buffer) >= self.online_update_interval:
             self.model.train()  # switch back to training mode
 
-            decoder_inputs_ids = pad_to_2d([x[0] for x in self.buffer], 0)
-            input_ids = pad_to_2d([x[2] for x in self.buffer], 0)
+            input_ids = pad_to_2d([x[2] for x in self.buffer], 0)            
+            if sample_student:
+                decoder_inputs_ids = pad_to_2d([x[0] for x in self.buffer], 0)
+            else:
+                student_decoder_input_ids = pad_to_2d([x[3] for x in self.buffer], 0)
+            
             student_logits = self.get_logits(
                 model, input_ids, torch.ones_like(input_ids), decoder_inputs_ids
             )
@@ -334,16 +363,19 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 )
 
             # only compute loss at wrong predictions
-            #mask = torch.ones_like(decoder_inputs_ids, dtype=torch.bool)
-            #for i, data in enumerate(self.buffer):
-            #    cur_wrong_token_ids = data[1]
-            #    mask[i, cur_wrong_token_ids] = False
-            #mask = mask[..., 1:]
+            if args.all_token_mask:
+                # compute loss from all tokens
+                mask = decoder_inputs_ids[..., 1:] == self.tokenizer.pad_token_id    
+            else:
+                # only compute loss at wrong predictions
+                mask = torch.ones_like(decoder_inputs_ids, dtype=torch.bool)
+                for i, data in enumerate(self.buffer):
+                    cur_wrong_token_ids = data[1]
+                    mask[i, cur_wrong_token_ids] = False
+                mask = mask[..., 1:]
 
-            student_logits = student_logits.float()
-            teacher_logits = teacher_logits.float()
- 
-            mask = decoder_inputs_ids == self.tokenizer.pad_token_id
+            student_logits = student_logits[:, :-1, :].float()
+            teacher_logits = teacher_logits[:, :-1, :].float()
             
             loss = self.soft_cross_entropy(student_logits, teacher_logits, mask)
             loss.backward()

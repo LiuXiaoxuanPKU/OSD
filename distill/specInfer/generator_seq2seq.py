@@ -11,6 +11,16 @@ from typing import List
 from .generator import GeneratorOutput, Generator
 
 # logger = SpecLogger("output/generator.info")
+@dataclass
+class Seq2SeqGeneratorOutput:
+    output: List[str]
+    generated_ids: torch.tensor
+    student_generated_ids: torch.tensor
+    correct_tokens: torch.tensor
+    propose_steps: int
+    sample_steps: int
+    alpha_sum: float
+    wrong_token_ids: List[int]
 
 class Seq2SeqGenerator(Generator):
     def __init__(self,
@@ -46,7 +56,9 @@ class Seq2SeqGenerator(Generator):
         self.proposer.model.eval()
 
         generated_token_cnt = 0
+        student_generated_token_cnt = 0
         generated_tokens = None
+        student_generated_tokens = None
         wrong_token_ids = []
         # generate 1 dummy decoder input ids
         proposer_input = Seq2SeqInputAndCache(
@@ -90,6 +102,16 @@ class Seq2SeqGenerator(Generator):
             generated_token_cnt += accept_token_ids.shape[1]
             wrong_token_ids.append(generated_token_cnt - 1)
 
+            student_token_ids = proposer_output.output_ids
+            # append free token from teacher
+            student_token_ids = torch.cat([student_token_ids, accept_token_ids[..., -1]], dim=-1)
+            if student_generated_tokens is None:
+                student_generated_tokens = proposer_output.output_ids
+            else:
+                student_generated_tokens = torch.cat(
+                    [student_generated_tokens,proposer_output.output_ids], dim=-1)
+            student_generated_token_cnt += student_token_ids.shape[1]
+
             if correct_tokens is None:
                 correct_tokens = accept_token_ids[:, :-1]
             else:
@@ -110,8 +132,9 @@ class Seq2SeqGenerator(Generator):
 
         self.proposer.print_time()
         self.verifier.print_time()
-        return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens),
+        return Seq2SeqGeneratorOutput(self.tokenizer.batch_decode(generated_tokens),
                                 generated_tokens,
+                                student_generated_tokens,
                                 correct_tokens,
                                 propose_steps,
                                 sample_steps, 
