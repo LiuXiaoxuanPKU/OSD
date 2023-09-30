@@ -62,9 +62,9 @@ class Seq2SeqGenerator(Generator):
         wrong_token_ids = []
         # generate 1 dummy decoder input ids
         proposer_input = Seq2SeqInputAndCache(
-            input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, torch.ones_like(input_ids), None)
+            input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, attention_mask, None)
         verifier_input = Seq2SeqInputAndCache(
-            input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, torch.ones_like(input_ids), None)
+            input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, attention_mask, None)
 
         correct_tokens = None
         propose_steps = 0
@@ -104,15 +104,20 @@ class Seq2SeqGenerator(Generator):
 
             student_token_ids = proposer_output.output_ids
             if student_generated_tokens is None:
-                student_generated_tokens = proposer_output.output_ids
+                student_generated_tokens = proposer_output.output_ids.reshape(1, -1)
             else:
                 student_generated_tokens = torch.cat(
-                    [student_generated_tokens,proposer_output.output_ids], dim=-1)
+                    [student_generated_tokens, proposer_output.output_ids.reshape(1, -1)], dim=-1)
             student_generated_token_cnt += student_token_ids.shape[1]
 
-            if student_generated_token_cnt < generated_token_cnt:
+            if student_token_ids.shape[1] < accept_token_ids.shape[1]:
                 # append free token from teacher
-                student_token_ids = torch.cat([student_token_ids, accept_token_ids[-1].reshape(1, -1)], dim=-1)
+                diff_count = accept_token_ids.shape[1] - student_token_ids.shape[1]
+                student_generated_tokens = torch.cat([student_generated_tokens, accept_token_ids[:, -diff_count].reshape(1, -1)], dim=-1)
+            if student_token_ids.shape[1] > accept_token_ids.shape[1]:
+                # append free token from teacher
+                diff_count = student_token_ids.shape[1] - accept_token_ids.shape[1]
+                student_generated_tokens = student_generated_tokens[:, :-diff_count]
 
             if correct_tokens is None:
                 correct_tokens = accept_token_ids[:, :-1]

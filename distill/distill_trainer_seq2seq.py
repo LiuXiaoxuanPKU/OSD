@@ -301,7 +301,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         input_ids =  inputs["input_ids"]
         # use speculative decoding to generate tokens
         attention_mask = inputs["attention_mask"]
-        decoder_inputs_ids = inputs["decoder_input_ids"]
+        decoder_input_ids = inputs["decoder_input_ids"]
         output = self.generator.generate(input_ids, attention_mask,
                                          max_new_tokens) 
         debug = False
@@ -324,11 +324,12 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         
         generated_ids = output.generated_ids.clone().detach()
         student_decoder_ids = output.student_generated_ids.clone().detach()
-        token_ids = torch.cat([decoder_inputs_ids, output.generated_ids], dim=-1)
+        token_ids = torch.cat([decoder_input_ids, generated_ids], dim=-1)
+        student_token_ids = torch.cat([decoder_input_ids, student_decoder_ids], dim=-1)
         wrong_token_ids = [
-            decoder_inputs_ids.shape[-1] + t for t in output.wrong_token_ids
+            decoder_input_ids.shape[-1] + t for t in output.wrong_token_ids
         ]
-        self.buffer.append((token_ids, wrong_token_ids, input_ids, student_decoder_ids))
+        self.buffer.append((token_ids, wrong_token_ids, input_ids, student_token_ids))
         self.alphas.append(output.alpha_sum)
         self.sample_steps.append(output.sample_steps)
 
@@ -346,29 +347,30 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         if len(self.buffer) >= self.online_update_interval:
             self.model.train()  # switch back to training mode
 
-            input_ids = pad_to_2d([x[2] for x in self.buffer], 0)            
+            input_ids = pad_to_2d([x[2] for x in self.buffer], 0)
+            # mix-token not yet supported     
             if sample_student:
-                decoder_inputs_ids = pad_to_2d([x[0] for x in self.buffer], 0)
+                decoder_input_ids = pad_to_2d([x[3] for x in self.buffer], 0)
             else:
-                student_decoder_input_ids = pad_to_2d([x[3] for x in self.buffer], 0)
+                decoder_input_ids = pad_to_2d([x[0] for x in self.buffer], 0)
             
             student_logits = self.get_logits(
-                model, input_ids, torch.ones_like(input_ids), decoder_inputs_ids
+                model, input_ids, attention_mask, decoder_input_ids
             )
             # generate teacher logits as the label
             # TODO: we can avoid this forward by getting logits during speculative decoding
             with torch.no_grad():
                 teacher_logits = self.get_logits(
-                    self.teacher_model, input_ids, torch.ones_like(input_ids), decoder_inputs_ids
+                    self.teacher_model, input_ids, attention_mask, decoder_input_ids
                 )
 
             # only compute loss at wrong predictions
             if self.args.all_token_mask:
                 # compute loss from all tokens
-                mask = decoder_inputs_ids[..., 1:] == self.tokenizer.pad_token_id    
+                mask = decoder_input_ids[..., 1:] == self.tokenizer.pad_token_id    
             else:
                 # only compute loss at wrong predictions
-                mask = torch.ones_like(decoder_inputs_ids, dtype=torch.bool)
+                mask = torch.ones_like(decoder_input_ids, dtype=torch.bool)
                 for i, data in enumerate(self.buffer):
                     cur_wrong_token_ids = data[1]
                     mask[i, cur_wrong_token_ids] = False
