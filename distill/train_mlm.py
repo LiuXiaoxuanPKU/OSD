@@ -184,6 +184,12 @@ class Seq2SeqTrainingArguments(transformers.Seq2SeqTrainingArguments):
             "choices" : ["forward", "reverse", "jsd"]
         }
     )
+    all_token_mask: bool = field(
+        default=False,
+        metadata = {
+            "help": "meaningful only for online learning. use all tokens to compute loss. otherwise use only wrong tokens"
+        }
+    )
 
 local_rank = None
 

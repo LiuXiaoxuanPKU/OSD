@@ -322,7 +322,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             print(output.sample_steps)
             print("------")
         
-        generated_ids = output.genreated_ids.clone().detach()
+        generated_ids = output.generated_ids.clone().detach()
         student_decoder_ids = output.student_generated_ids.clone().detach()
         token_ids = torch.cat([decoder_inputs_ids, output.generated_ids], dim=-1)
         wrong_token_ids = [
@@ -363,7 +363,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 )
 
             # only compute loss at wrong predictions
-            if args.all_token_mask:
+            if self.args.all_token_mask:
                 # compute loss from all tokens
                 mask = decoder_inputs_ids[..., 1:] == self.tokenizer.pad_token_id    
             else:
