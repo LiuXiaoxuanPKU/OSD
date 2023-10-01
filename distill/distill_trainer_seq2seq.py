@@ -322,12 +322,11 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             print(output.sample_steps)
             print("------")
         
-        generated_ids = output.generated_ids.clone().detach()
-        student_decoder_ids = output.student_generated_ids.clone().detach()
-        token_ids = torch.cat([decoder_input_ids, generated_ids], dim=-1)
-        student_token_ids = torch.cat([decoder_input_ids, student_decoder_ids], dim=-1)
+        token_ids = output.generated_ids.clone().detach()
+        student_token_ids = output.student_generated_ids.clone().detach()
+
         wrong_token_ids = [
-            decoder_input_ids.shape[-1] + t for t in output.wrong_token_ids
+            t for t in output.wrong_token_ids
         ]
         self.buffer.append((token_ids, wrong_token_ids, input_ids, student_token_ids))
         self.alphas.append(output.alpha_sum)
@@ -373,6 +372,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 mask = torch.ones_like(decoder_input_ids, dtype=torch.bool)
                 for i, data in enumerate(self.buffer):
                     cur_wrong_token_ids = data[1]
+                    print('wrong tokens pos: {}'.format(cur_wrong_token_ids))
                     mask[i, cur_wrong_token_ids] = False
                 mask = mask[..., 1:]
 
