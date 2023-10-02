@@ -237,8 +237,6 @@ def train():
         config=config,
         cache_dir=training_args.cache_dir,
     )
-    # # train from scratch
-    # model = transformers.LlamaForCausalLM(config)
 
     # teacher model
     teacher_config = transformers.AutoConfig.from_pretrained(
@@ -409,8 +407,6 @@ def train():
 
     # data partitioning
     if data_args.fast_eval:
-        #train_random_indices = random.sample(range(len(train_dataset)), len(train_dataset))
-        #train_dataset = datasets.Dataset.from_dict(train_dataset[train_random_indices])
         
         if training_args.do_eval:
             if len(eval_dataset) < 200:

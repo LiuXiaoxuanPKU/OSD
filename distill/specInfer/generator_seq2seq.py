@@ -51,7 +51,7 @@ class Seq2SeqGenerator(Generator):
         def sample_method(logits):
             return torch.softmax(logits / temperature, dim=-1)
         
-        # make sure all models are in the inference mode
+        # make sure teacher model is always in the inference mode
         self.model.eval()
         self.proposer.model.eval()
 

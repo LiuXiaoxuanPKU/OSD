@@ -118,7 +118,6 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 max_new_tokens,
                 student_token_ratio
             )
-            generated_ids = generated_ids.clone().detach()
         elif sample_student:
             generated_ids, _ = self.get_generated_ids(
                 model,
@@ -128,9 +127,9 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 max_new_tokens,
                 False,
             )
-            generated_ids = generated_ids.clone().detach()
         else:
             generated_ids = inputs["decoder_input_ids"]
+        generated_ids = generated_ids.clone().detach()
         
         # preparet attention_mask and output_mask
         if sample_mix_token or sample_student:
@@ -151,6 +150,9 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         student_logits = student_logits[..., :-1, :].float()
         teacher_logits = teacher_logits[..., :-1, :].float()
 
+        print('student logit shape: {}'.format(student_logits.shape))
+        print('teacher logit shape: {}'.format(teacher_logits.shape))
+        
         # calculate loss
         if self.kl_method == KLMethod.Forward:
             loss = self.soft_cross_entropy(
@@ -301,7 +303,6 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         input_ids =  inputs["input_ids"]
         # use speculative decoding to generate tokens
         attention_mask = inputs["attention_mask"]
-        decoder_input_ids = inputs["decoder_input_ids"]
         output = self.generator.generate(input_ids, attention_mask,
                                          max_new_tokens) 
         debug = False
@@ -323,7 +324,9 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             print("------")
         
         token_ids = output.generated_ids.clone().detach()
+        token_ids = torch.cat([torch.zeros(1,1).long().cuda(), token_ids], dim=-1)
         student_token_ids = output.student_generated_ids.clone().detach()
+        student_token_ids = torch.cat([torch.zeros(1,1).long().cuda(), student_token_ids], dim=-1)
 
         wrong_token_ids = [
             t for t in output.wrong_token_ids
@@ -340,7 +343,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 / sum(self.sample_steps[-window_size:])
             )
             if self.args.local_rank == 0:
-                print(f"avg alpha : {avg_alpha}")
+                print(f"alpha : {avg_alpha}")
                 wandb.log({"alpha": avg_alpha})
 
         if len(self.buffer) >= self.online_update_interval:
@@ -349,10 +352,12 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             input_ids = pad_to_2d([x[2] for x in self.buffer], 0)
             # mix-token not yet supported     
             if sample_student:
-                decoder_input_ids = pad_to_2d([x[3] for x in self.buffer], 0)
+                print('sampling from student...')
+                decoder_input_ids = pad_to_2d([x[3] for x in self.buffer], 0, 512)
             else:
-                decoder_input_ids = pad_to_2d([x[0] for x in self.buffer], 0)
-            
+                print('sampling from teacher...')
+                decoder_input_ids = pad_to_2d([x[0] for x in self.buffer], 0, 512)
+
             student_logits = self.get_logits(
                 model, input_ids, attention_mask, decoder_input_ids
             )
@@ -365,8 +370,8 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
 
             # only compute loss at wrong predictions
             if self.args.all_token_mask:
-                # compute loss from all tokens
-                mask = decoder_input_ids[..., 1:] == self.tokenizer.pad_token_id    
+                # compute loss from all tokens, except for the padded ones
+                mask = decoder_input_ids == 0
             else:
                 # only compute loss at wrong predictions
                 mask = torch.ones_like(decoder_input_ids, dtype=torch.bool)
@@ -374,10 +379,10 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                     cur_wrong_token_ids = data[1]
                     print('wrong tokens pos: {}'.format(cur_wrong_token_ids))
                     mask[i, cur_wrong_token_ids] = False
-                mask = mask[..., 1:]
+            mask = mask
 
-            student_logits = student_logits[:, :-1, :].float()
-            teacher_logits = teacher_logits[:, :-1, :].float()
+            student_logits = student_logits
+            teacher_logits = teacher_logits
             
             loss = self.soft_cross_entropy(student_logits, teacher_logits, mask)
             loss.backward()
