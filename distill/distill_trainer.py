@@ -51,14 +51,7 @@ class DistillTrainer(Trainer):
         self.generator = Generator(
             self.model, self.teacher_model, self.tokenizer, args.max_propose_num
         )
-        print(self.tokenizer.name_or_path, self.model.name_or_path)
         self.train_step_cnt = 0
-
-        self.use_vllm = use_vllm
-        if self.use_vllm:
-            self.vllm_model = LLM(model=self.model.name_or_path,
-                                  tokenizer=self.tokenizer.name_or_path,
-                                  gpu_memory_utilization=0.5)
 
         # online related params
         self.mode = args.mode
