@@ -3,7 +3,7 @@ from transformers import Trainer, TrainerCallback
 from transformers.trainer_pt_utils import LabelSmoother
 import wandb
 from specInfer.generator import Generator
-from specInfer.common import pad_to_2d
+from specInfer.common import pad_to_2d, sychronize_time
 from enum import Enum
 import random
 from torch.utils.data import DataLoader
@@ -51,7 +51,14 @@ class DistillTrainer(Trainer):
         self.generator = Generator(
             self.model, self.teacher_model, self.tokenizer, args.max_propose_num
         )
+        print(self.tokenizer.name_or_path, self.model.name_or_path)
         self.train_step_cnt = 0
+
+        self.use_vllm = use_vllm
+        if self.use_vllm:
+            self.vllm_model = LLM(model=self.model.name_or_path,
+                                  tokenizer=self.tokenizer.name_or_path,
+                                  gpu_memory_utilization=0.5)
 
         # online related params
         self.mode = args.mode
@@ -153,13 +160,13 @@ class DistillTrainer(Trainer):
             input_ids = pad_to_2d([x[0] for x in self.buffer], 0)
             student_logits = self.get_logits(
                 model, input_ids, torch.ones_like(input_ids)
-            )
+            ).float()
             # generate teacher logits as the label
             # TODO: we can avoid this forward by getting logits during speculative decoding
             with torch.no_grad():
                 teacher_logits = self.get_logits(
                     self.teacher_model, input_ids, torch.ones_like(input_ids)
-                )
+                ).float()
 
             # only compute loss at wrong predictions
             mask = torch.ones_like(input_ids, dtype=torch.bool)
@@ -179,10 +186,13 @@ class DistillTrainer(Trainer):
         max_new_tokens = 128
         student_temperature = 1.0
         teacher_temperature = 1.0
+        debug = False
+        if debug:
+            step_start_time = sychronize_time()
 
         if self.sample_source == SampleSource.MixRequest:
             student_request_ratio = 0.5
-        
+
         if self.sample_source == SampleSource.MixToken:
             student_token_ratio = 0.5
 
@@ -190,7 +200,8 @@ class DistillTrainer(Trainer):
             fwd_loss_ratio = 0.9
 
         sample_mix_token = False
-        # sample token ids
+
+        ############ sample tokens #############
         if self.sample_source == SampleSource.Teacher:
             sample_student = False
         elif self.sample_source == SampleSource.Student:
@@ -200,7 +211,9 @@ class DistillTrainer(Trainer):
         elif self.sample_source == SampleSource.MixToken:
             sample_mix_token = True
 
-        # sample tokens
+        if debug:
+            sample_time_start = sychronize_time()
+
         if sample_mix_token:
             copy_model.load_state_dict(model.state_dict())
             generated_ids = self.get_mix_generated_ids(
@@ -226,28 +239,65 @@ class DistillTrainer(Trainer):
             generated_ids = generated_ids.clone().detach()
         else:
             generated_ids = inputs["input_ids"]
-        
-        # preparet attention_mask and output_mask
+        if debug:
+            print(f"Sample time: {sychronize_time() - sample_time_start}")
+
+        if debug:
+            prepare_time_start = sychronize_time()
+
+        ############ preparet attention_mask and output_mask ##############
         if sample_mix_token or sample_student:
             prompt_len = inputs["prompt_ids"].shape[-1]
             attention_mask = generated_ids != self.tokenizer.pad_token_id
             output_mask = generated_ids[..., 1:] == self.tokenizer.pad_token_id
             # Ignore prompt when calculating loss
             output_mask[..., :prompt_len-1] = True
-            # print(f"bsz: {bsz}, total_len: {total_seq_len}, gen_len: {gen_len}, output_sum:{(~output_mask).sum()}")
+            if False:
+                print("\n")
+                print(generated_ids[:, prompt_len:])
+                print("[prompt]", self.tokenizer.batch_decode(
+                    inputs["prompt_ids"], skip_special_tokens=True))
+                print("[student] ", self.tokenizer.batch_decode(
+                    generated_ids[:, prompt_len:]))
+                labels = torch.where(
+                    inputs["labels"] == IGNORE_TOKEN_ID, self.tokenizer.unk_token_id, inputs["labels"])
+                print("[teacher]", self.tokenizer.batch_decode(
+                    labels, skip_special_tokens=True))
+                print(f"bsz: {bsz}, total_len: {total_seq_len}, gen_len: {gen_len}, ",
+                      f"output_sum:{(~output_mask).sum()}, atten_mask: {attention_mask.sum()}")
+
         else:
             attention_mask = inputs["attention_mask"]
             output_mask = inputs["labels"][..., 1:] == IGNORE_TOKEN_ID
-            
-        # get student/teacher logits
+        if debug:
+            print(f"Prepare time: {sychronize_time() - prepare_time_start}")
+
+        ############ get student/teacher logits ######################
+        cal_logits_start = sychronize_time()
         student_logits = self.get_logits(model, generated_ids, attention_mask)
         with torch.no_grad():
             teacher_logits = self.get_logits(
                 self.teacher_model, generated_ids, attention_mask)
         student_logits = student_logits[..., :-1, :].float()
         teacher_logits = teacher_logits[..., :-1, :].float()
+        if debug:
+            print(
+                f"Calculate logits time: {sychronize_time() - cal_logits_start}")
 
-        # calculate loss
+        if False:
+            with torch.no_grad():
+                fwd_student_logits = self.get_logits(
+                    model, inputs["input_ids"], inputs["attention_mask"])[..., :-1, :].float()
+                fwd_teacher_logits = self.get_logits(
+                    self.teacher_model, inputs["input_ids"], inputs["attention_mask"])[..., :-1, :].float()
+                fwd_loss = self.soft_cross_entropy(
+                    fwd_student_logits / student_temperature,
+                    fwd_teacher_logits / teacher_temperature,
+                    inputs["labels"][..., 1:] == IGNORE_TOKEN_ID
+                )
+                print("teacher-sample-loss", fwd_loss)
+
+        ################### calculate loss ##############
         if self.kl_method == KLMethod.Forward:
             loss = self.soft_cross_entropy(
                 student_logits / student_temperature,
@@ -277,7 +327,13 @@ class DistillTrainer(Trainer):
         if self.args.gradient_accumulation_steps > 1:
             loss = loss / self.args.gradient_accumulation_steps
 
+        if debug:
+            compute_loss_time_start = sychronize_time()
         loss.backward()
+        if debug:
+            print(
+                f"Backward time: {sychronize_time() - compute_loss_time_start}")
+            print(f"Total step time: {sychronize_time() - step_start_time}")
         return loss.detach()
 
     def log(self, logs):
