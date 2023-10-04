@@ -1,3 +1,4 @@
+export WANDB_PROJECT=spec
 datapath=$1
 bash bash_scripts/spider/online.sh $datapath
 bash bash_scripts/spider/offline.sh $datapath teacher forward

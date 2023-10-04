@@ -1,9 +1,9 @@
 datapath=$1
 percentage=$2
-WANDB_PROJECT=spec python distill/train.py \
+python distill/train.py \
     --student_model_path $datapath/sharp_${percentage} \
     --teacher_model_path $datapath/vicuna-7b-v1.3/ \
-    --data_path data/sharp.json \
+    --data_path data/raw_data/sharp.json \
     --max_propose_num 5 \
     --bf16 True \
     --output_dir $datapath/sharp_${percentage} \

@@ -1,8 +1,8 @@
 datapath=$1
-WANDB_PROJECT=spec python distill/train.py \
+python distill/train.py \
     --student_model_path $datapath/llama-160m \
     --teacher_model_path  $datapath/vicuna-7b-v1.3/ \
-    --data_path data/code_search_net_train.json \
+    --data_path data/raw_data/code_search_net_train.json \
     --max_propose_num 5 \
     --bf16 True \
     --output_dir $datapath/code_search_net_online \

@@ -1,3 +1,4 @@
+export WANDB_PROJECT=spec
 datapath=$1
 bash bash_scripts/gsm8k/offline.sh $datapath teacher forward
 bash bash_scripts/gsm8k/offline.sh $datapath student forward

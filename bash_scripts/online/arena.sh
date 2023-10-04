@@ -4,7 +4,7 @@ datafile=$2
 WANDB_PROJECT=spec python distill/train.py \
     --student_model_path $datapath/llama-160m \
     --teacher_model_path $datapath/vicuna-7b-v1.3/ \
-    --data_path arena/$datafile.json \
+    --data_path data/arena/$datafile.json \
     --max_propose_num 5 \
     --bf16 True \
     --output_dir $datapath/arena_$datafile \

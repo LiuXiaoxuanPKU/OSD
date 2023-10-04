@@ -2,7 +2,7 @@ datapath=$1
 python distill/train.py \
     --student_model_path $datapath/llama-160m\
     --teacher_model_path $datapath/vicuna-7b-v1.3/ \
-    --data_path data/gbharti_finance-alpaca_train_with_answer.json \
+    --data_path data/raw_data/gbharti_finance-alpaca_train_with_answer.json \
     --max_propose_num 5 \
     --bf16 True \
     --output_dir $datapath/gbharti_finance-alpaca_online_distill\
@@ -28,10 +28,10 @@ python distill/train.py \
     --kl_method forward \
     --report_to none
 
-WANDB_PROJECT=spec python distill/train.py \
+python distill/train.py \
     --student_model_path $datapath/gbharti_finance-alpaca_online_distill \
     --teacher_model_path $datapath/vicuna-7b-v1.3/ \
-    --data_path data/gbharti_finance-alpaca_train.json \
+    --data_path data/raw_data/gbharti_finance-alpaca_train.json \
     --max_propose_num 5 \
     --bf16 True \
     --output_dir $datapath/gbharti_finance-alpaca_online_baseline\

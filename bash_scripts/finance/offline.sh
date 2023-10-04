@@ -2,11 +2,11 @@ datapath=$1
 sample=$2
 kl=$3
 
-WANDB_PROJECT=specInfer python distill/train.py \
+python distill/train.py \
     --student_model_path $datapath/llama-160m \
     --teacher_model_path $datapath/vicuna-7b-v1.3/ \
-    --data_path data/gbharti_finance-alpace_train_with_answer.json \
-    --eval_data_path data/gbharti_finance-alpace_test.json \
+    --data_path data/raw_data/gbharti_finance-alpace_train_with_answer.json \
+    --eval_data_path data/raw_data/gbharti_finance-alpace_test.json \
     --max_propose_num 5 \
     --bf16 True \
     --output_dir $datapath/gbharti_finance-alpace_${sample}_${kl} \

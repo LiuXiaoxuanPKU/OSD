@@ -14,15 +14,15 @@ class Collector:
 
     def get_raw_filename(self, split, prefix):
         if prefix is not None:
-            return f"{prefix}_{self.name}_{split}_raw.json"
+            return f"raw_data/{prefix}_{self.name}_{split}_raw.json"
         else:
-            return f"{self.name}_{split}_raw.json"
+            return f"raw_data/{self.name}_{split}_raw.json"
 
     def get_output_filename(self, split, prefix):
         if prefix is not None:
-            return f"{prefix}_{self.name}_{split}.json"
+            return f"raw_data/{prefix}_{self.name}_{split}.json"
         else:
-            return f"{self.name}_{split}.json"
+            return f"raw_data/{self.name}_{split}.json"
 
     def collect(self,
                 splits, 
