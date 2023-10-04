@@ -1,11 +1,12 @@
 datapath=$1
-WANDB_PROJECT=specInfer python distill/train.py \
-    --student_model_path JackFram/llama-160m \
+percentage=$2
+WANDB_PROJECT=spec python distill/train.py \
+    --student_model_path $datapath/sharp_${percentage} \
     --teacher_model_path $datapath/vicuna-7b-v1.3/ \
     --data_path data/sharp.json \
     --max_propose_num 5 \
     --bf16 True \
-    --output_dir $datapath/sharp_online \
+    --output_dir $datapath/sharp_${percentage} \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 1 \
@@ -20,9 +21,9 @@ WANDB_PROJECT=specInfer python distill/train.py \
     --model_max_length 512 \
     --gradient_checkpointing True \
     --lazy_preprocess True \
-    --run_name sharp_online \
+    --run_name sharp_${percentage} \
     --mode online \
     --online_eval_interval 1 \
-    --online_update_interval 1 \
+    --online_update_interval 10000 \
     --logging_steps 1 \
     --logging_nan_inf_filter true 

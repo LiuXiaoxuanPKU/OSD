@@ -110,13 +110,14 @@ class DistillTrainer(Trainer):
             input_ids.shape[-1] + t for t in output.wrong_token_ids
         ]
         if "dataset" in inputs:
-            if inputs["dataset"] not in self.alphas_by_dataset:
-                 self.alphas_by_dataset[inputs["dataset"]] = []
+            dataset = inputs["dataset"][0]
+            if dataset not in self.alphas_by_dataset:
+                 self.alphas_by_dataset[dataset] = []
             if self.train_step_cnt <= 2000:
-                if inputs["dataset"] == "gsm8k":
+                if dataset == "gsm8k":
                     self.buffer.append((token_ids, wrong_token_ids))
             else:
-                if inputs["dataset"] == "finance":
+                if dataset == "finance":
                     self.buffer.append((token_ids, wrong_token_ids))
         else:
             self.buffer.append((token_ids, wrong_token_ids))
@@ -125,7 +126,7 @@ class DistillTrainer(Trainer):
         self.alphas.append(output.alpha_sum)
         self.sample_steps.append(output.sample_steps)
         if "dataset" in inputs:
-             self.alphas_by_dataset[inputs["dataset"]].append(output.alpha_sum * 1.0 / output.sample_steps)
+             self.alphas_by_dataset[dataset].append(output.alpha_sum * 1.0 / output.sample_steps)
         elif "language" in inputs:
             language = inputs["language"][0]
             if language not in self.alphas_by_language:
@@ -141,7 +142,7 @@ class DistillTrainer(Trainer):
             )
             wandb.log({"alpha": avg_alpha})
             if "dataset" in inputs:
-                wandb.log({f"alpha_{inputs['dataset']}": self.alphas_by_dataset[inputs["dataset"]][-1]})
+                wandb.log({f"alpha_{dataset}": self.alphas_by_dataset[dataset][-1]})
             elif "language" in inputs:
                 language_alpha = self.alphas_by_language[language][-1] 
                 wandb.log({f"alpha_{language}": language_alpha})
