@@ -123,9 +123,6 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 teacher_logits = self.get_logits(self.teacher_model, input_ids, attention_mask, generated_ids)
         student_logits = student_logits[..., :-1, :].float()
         teacher_logits = teacher_logits[..., :-1, :].float()
-
-        print('student logit shape: {}'.format(student_logits.shape))
-        print('teacher logit shape: {}'.format(teacher_logits.shape))
         
         # calculate loss
         if self.kl_method == KLMethod.Forward:
@@ -352,10 +349,6 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                 for i, data in enumerate(self.buffer):
                     cur_wrong_token_ids = data[1]
                     mask[i, cur_wrong_token_ids] = False
-            mask = mask
-
-            student_logits = student_logits
-            teacher_logits = teacher_logits
             
             loss = self.soft_cross_entropy(student_logits, teacher_logits, mask)
             loss.backward()
