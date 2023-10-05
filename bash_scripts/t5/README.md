@@ -1,0 +1,1 @@
+You can use the same set of scripts for offline and online traininig on different tasks.
