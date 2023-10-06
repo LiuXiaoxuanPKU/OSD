@@ -17,7 +17,7 @@ import random
 
 import typing
 
-from .distill_trainer import SampleSource, SAMPLE_SOURCE_MAP, KLMethod, KL_METHOD_MAP
+from distill_trainer import SampleSource, SAMPLE_SOURCE_MAP, KLMethod, KL_METHOD_MAP
 
 eval_cnt = 0
 
@@ -250,12 +250,6 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
 
         if self.sample_source == SampleSource.MixRequest:
             student_request_ratio = 0.5
-        
-        if self.sample_source == SampleSource.MixToken:
-            student_token_ratio = 0.5
-
-        if self.kl_method == KLMethod.JSD:
-            fwd_loss_ratio = 0.9
 
         sample_mix_token = False
         # sample token ids
@@ -263,17 +257,15 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             sample_student = False
         elif self.sample_source == SampleSource.Student:
             sample_student = True
-        elif self.sample_source == SampleSource.MixRequest:
-            sample_student = True if random.random() < student_request_ratio else False
-        elif self.sample_source == SampleSource.MixToken:
-            sample_mix_token = True
+        else:
+            raise NotImplementedError('online distillation only supports teacher or student sampling.')
         
         # remove any masking
         input_ids =  inputs["input_ids"]
         # use speculative decoding to generate tokens
         attention_mask = inputs["attention_mask"]
         output = self.generator.generate(input_ids, attention_mask,
-                                         max_new_tokens) 
+                                         max_new_tokens, sample_student) 
         debug = False
         if debug:
             ref_generated = self.get_generated_ids(self.teacher_model, 
@@ -294,13 +286,11 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         
         token_ids = output.generated_ids.clone().detach()
         token_ids = torch.cat([torch.zeros(1,1).long().cuda(), token_ids], dim=-1)
-        student_token_ids = output.student_generated_ids.clone().detach()
-        student_token_ids = torch.cat([torch.zeros(1,1).long().cuda(), student_token_ids], dim=-1)
 
         wrong_token_ids = [
             t for t in output.wrong_token_ids
         ]
-        self.buffer.append((token_ids, wrong_token_ids, input_ids, student_token_ids))
+        self.buffer.append((token_ids, wrong_token_ids, input_ids))
         self.alphas.append(output.alpha_sum)
         self.sample_steps.append(output.sample_steps)
 
@@ -320,14 +310,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
 
             input_ids = pad_to_2d([x[2] for x in self.buffer], 0)
             # mix-token not yet supported     
-            if sample_student:
-                print('sampling from student...')
-                decoder_input_ids = pad_to_2d([x[3] for x in self.buffer], 0, 512)
-            elif sample_mix_token:
-                raise NotImplementedError('mix token sampling for online training is not supported.')
-            else:
-                print('sampling from teacher...')
-                decoder_input_ids = pad_to_2d([x[0] for x in self.buffer], 0, 512)
+            decoder_input_ids = pad_to_2d([x[0] for x in self.buffer], 0, 512)
 
             student_logits = self.get_logits(
                 model, input_ids, attention_mask, decoder_input_ids
@@ -350,7 +333,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
                     cur_wrong_token_ids = data[1]
                     mask[i, cur_wrong_token_ids] = False
             
-            loss = self.soft_cross_entropy(student_logits, teacher_logits, mask)
+            loss = self.soft_cross_entropy(student_logits / student_temperature, teacher_logits / teacher_temperature, mask)
             loss.backward()
             self.buffer = []
             return loss.detach()
@@ -513,7 +496,7 @@ class Seq2SeqDistillTrainerCallback(TrainerCallback):
             if args.do_train:
                 # where wandb is initiated
                 wandb.log({"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
-                wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
+                wandb.log({"eval alpha": self.alpha * 1.0 / self.sample_steps})
 
         self.eval_step += 1
         self.correct_cnt = 0
