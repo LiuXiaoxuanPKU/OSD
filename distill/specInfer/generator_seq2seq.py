@@ -10,7 +10,17 @@ from typing import List
 
 from .generator import GeneratorOutput, Generator
 
-from distill.distill_trainer import SampleSource
+# logger = SpecLogger("output/generator.info")
+@dataclass
+class Seq2SeqGeneratorOutput:
+    output: List[str]
+    generated_ids: torch.tensor
+    student_generated_ids: torch.tensor
+    correct_tokens: torch.tensor
+    propose_steps: int
+    sample_steps: int
+    alpha_sum: float
+    wrong_token_ids: List[int]
 
 class Seq2SeqGenerator(Generator):
     def __init__(self,
@@ -37,7 +47,7 @@ class Seq2SeqGenerator(Generator):
         self.max_propose_num = max_propose_num
     
     @torch.inference_mode()
-    def generate(self, input_ids, attention_mask, max_tokens, sample_student=False, labels=None, temperature=0.01):
+    def generate(self, input_ids, attention_mask, max_tokens, labels=None, temperature=0.01):
         def sample_method(logits):
             return torch.softmax(logits / temperature, dim=-1)
         
@@ -46,105 +56,89 @@ class Seq2SeqGenerator(Generator):
         self.proposer.model.eval()
 
         generated_token_cnt = 0
+        student_generated_token_cnt = 0
         generated_tokens = None
-        accept_token_ids = None
-
+        student_generated_tokens = None
         wrong_token_ids = []
         # generate 1 dummy decoder input ids
         proposer_input = Seq2SeqInputAndCache(
             input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, attention_mask, None)
         verifier_input = Seq2SeqInputAndCache(
             input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, attention_mask, None)
-        
+
+        student_proposer_input = Seq2SeqInputAndCache(
+            input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, attention_mask, None)
+        student_proposer_output = Seq2SeqInputAndCache(
+            input_ids, torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long(), labels, attention_mask, None)
+
         correct_tokens = None
         propose_steps = 0
         alpha, sample_steps = 0, 0
         while True:
             start = sychronize_time()
+            # propose n tokens, proposer always propose the token with highest probability
+            proposer_output = self.proposer.propose(
+                proposer_input,
+                self.max_propose_num,
+                sample_method)
             propose_steps += 1
 
-            if sample_student:
-                # ---------- student sampling ---------- #
-                # prepare verifier input based on student outputs
-                proposer_output = self.proposer.propose(
-                        proposer_input,
-                        self.max_propose_num,
-                        sample_method
-                )
-                verifier_input = self.verifier.prepare_input(proposer_output,
-                                                            verifier_input)
-                # forward n tokens on the model in the a single run
-                verifier_output = self.verifier.verify(
-                    verifier_input,
-                    proposer_output.generated_len,
-                    sample_method)
-                
-                # compare selected tokens
-                _, cur_alpha, cur_sample_steps = self.sample_tokens(
-                    proposer_output, verifier_output)
-                alpha += cur_alpha
-                sample_steps += cur_sample_steps
-
-                # append student token
-                student_token_ids = proposer_output.output_ids
-                accept_token_ids = student_token_ids[:cur_sample_steps].unsqueeze(0)
-
-                if generated_tokens is None:
-                    generated_tokens = student_token_ids.reshape(1, -1)
-                else:
-                    generated_tokens = torch.cat(
-                        [generated_tokens, student_token_ids.reshape(1, -1)], dim=-1)
-                generated_token_cnt += student_token_ids.shape[1]
-                wrong_token_ids.append(generated_token_cnt - 1)
-
-                # adjust the student generated input, discard unnecessary kv cache
-                proposer_input = self.proposer.adjust_input(
-                    generated_tokens, proposer_input, proposer_output
-                )
-                verifier_input = self.verifier.adjust_input(
-                    generated_tokens, verifier_input, verifier_output)
-            else:
-                # propose n tokens, proposer always propose the token with highest probability
-                # ---------- teacher sampling ---------- #
-                proposer_output = self.proposer.propose(
-                    proposer_input,
+            # process student-sampling case
+            student_proposer_output = self.proposer.propose(
+                    student_proposer_input,
                     self.max_propose_num,
-                    sample_method)
-                
-                # prepare verifier input
-                verifier_input = self.verifier.prepare_input(proposer_output,
-                                                            verifier_input)
-                # forward n tokens on the model in the a single run
-                verifier_output = self.verifier.verify(
-                    verifier_input,
-                    proposer_output.generated_len,
-                    sample_method)
+                    sample_method
+            )
 
-                # compare selected tokens
-                accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
-                    proposer_output, verifier_output)
-                alpha += cur_alpha
-                sample_steps += cur_sample_steps
+            # prepare verifier input
+            verifier_input = self.verifier.prepare_input(proposer_output,
+                                                         verifier_input)
+            # forward n tokens on the model in the a single run
+            verifier_output = self.verifier.verify(
+                verifier_input,
+                proposer_output.generated_len,
+                sample_method)
 
-                if generated_tokens is None:
-                    generated_tokens = accept_token_ids
-                else:
-                    generated_tokens = torch.cat(
-                        [generated_tokens, accept_token_ids], dim=-1)
-                generated_token_cnt += accept_token_ids.shape[1]
-                wrong_token_ids.append(generated_token_cnt - 1)
+            # compare selected tokens
+            # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
+            accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
+                proposer_output, verifier_output)
+            alpha += cur_alpha
+            sample_steps += cur_sample_steps
+            # logger.log("acc_tokens", accept_token_ids)
+            if generated_tokens is None:
+                generated_tokens = accept_token_ids
+            else:
+                generated_tokens = torch.cat(
+                    [generated_tokens, accept_token_ids], dim=-1)
+            generated_token_cnt += accept_token_ids.shape[1]
+            wrong_token_ids.append(generated_token_cnt - 1)
 
-                # adjust the proposer/verifier input, discard unnecessary kv cache
-                proposer_input = self.proposer.adjust_input(
-                    accept_token_ids, proposer_input, proposer_output)
-                verifier_input = self.verifier.adjust_input(
-                    accept_token_ids, verifier_input, verifier_output)
-            
+            # append student token
+            student_token_ids = student_proposer_output.output_ids
+            if student_generated_tokens is None:
+                student_generated_tokens = student_proposer_output.output_ids.reshape(1, -1)
+            else:
+                student_generated_tokens = torch.cat(
+                    [student_generated_tokens, student_proposer_output.output_ids.reshape(1, -1)], dim=-1)
+            student_generated_token_cnt += student_token_ids.shape[1]
+
             if correct_tokens is None:
                 correct_tokens = accept_token_ids[:, :-1]
             else:
                 correct_tokens = torch.cat(
                     [correct_tokens, accept_token_ids[:, :-1]], dim=-1)
+
+            # adjust the proposer/verifier input, discard unnecessary kv cache
+            proposer_input = self.proposer.adjust_input(
+                accept_token_ids, proposer_input, proposer_output)
+            verifier_input = self.verifier.adjust_input(
+                accept_token_ids, verifier_input, verifier_output)
+
+            # adjust the student generated input, discard unnecessary kv cache
+            student_proposer_input = self.proposer.adjust_input(
+                student_generated_tokens, student_proposer_input, student_proposer_output
+            )
 
             if self.benchmark_time:
                 self.generation_time.append(sychronize_time() - start)
@@ -154,8 +148,9 @@ class Seq2SeqGenerator(Generator):
 
         self.proposer.print_time()
         self.verifier.print_time()
-        return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens),
+        return Seq2SeqGeneratorOutput(self.tokenizer.batch_decode(generated_tokens),
                                 generated_tokens,
+                                student_generated_tokens,
                                 correct_tokens,
                                 propose_steps,
                                 sample_steps, 
