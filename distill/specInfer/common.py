@@ -9,25 +9,13 @@ class InputAndCache:
     input_ids: torch.Tensor
     attention_mask: torch.Tensor
     past_key_values: torch.Tensor
-
-@dataclass
-class Seq2SeqInputAndCache:
-    input_ids: torch.Tensor
-    decoder_input_ids: torch.Tensor
-    labels: torch.Tensor
-    attention_mask: torch.Tensor
-    past_key_values: torch.Tensor
+    
+    # encoder-decoder only fields
+    labels: torch.Tensor = None
+    decoder_input_ids: torch.Tensor = None
 
 @dataclass
 class OutputAndCache:
-    generated_len: int
-    output_ids: torch.Tensor
-    output_logits: torch.Tensor
-    output_distribution: torch.Tensor
-    past_key_values: torch.Tensor
-
-@dataclass
-class Seq2SeqOutputAndCache:
     generated_len: int
     output_ids: torch.Tensor
     output_logits: torch.Tensor
