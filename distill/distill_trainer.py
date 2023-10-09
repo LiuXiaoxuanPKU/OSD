@@ -1,3 +1,4 @@
+import transformers
 import torch
 from transformers import Trainer, TrainerCallback
 from transformers.trainer_pt_utils import LabelSmoother
@@ -39,9 +40,10 @@ KL_METHOD_MAP = {
 }
 
 eval_cnt = 0
-import transformers
-copy_model = transformers.AutoModelForCausalLM.from_pretrained("JackFram/llama-160m")
+copy_model = transformers.AutoModelForCausalLM.from_pretrained(
+    "JackFram/llama-160m")
 copy_model.cuda()
+
 
 class DistillTrainer(Trainer):
     def __init__(self, teacher_model, *args, **kwargs):
@@ -112,7 +114,7 @@ class DistillTrainer(Trainer):
         if "dataset" in inputs:
             dataset = inputs["dataset"][0]
             if dataset not in self.alphas_by_dataset:
-                 self.alphas_by_dataset[dataset] = []
+                self.alphas_by_dataset[dataset] = []
             if self.train_step_cnt <= 2000:
                 if dataset == "gsm8k":
                     self.buffer.append((token_ids, wrong_token_ids))
@@ -121,17 +123,18 @@ class DistillTrainer(Trainer):
                     self.buffer.append((token_ids, wrong_token_ids))
         else:
             self.buffer.append((token_ids, wrong_token_ids))
-        
-        
+
         self.alphas.append(output.alpha_sum)
         self.sample_steps.append(output.sample_steps)
         if "dataset" in inputs:
-             self.alphas_by_dataset[dataset].append(output.alpha_sum * 1.0 / output.sample_steps)
+            self.alphas_by_dataset[dataset].append(
+                output.alpha_sum * 1.0 / output.sample_steps)
         elif "language" in inputs:
             language = inputs["language"][0]
             if language not in self.alphas_by_language:
                 self.alphas_by_language[language] = []
-            self.alphas_by_language[language].append(output.alpha_sum*1.0/output.sample_steps)
+            self.alphas_by_language[language].append(
+                output.alpha_sum*1.0/output.sample_steps)
 
         if self.train_step_cnt % self.online_eval_interval == 0:
             window_size = 1
@@ -142,15 +145,17 @@ class DistillTrainer(Trainer):
             )
             wandb.log({"alpha": avg_alpha})
             if "dataset" in inputs:
-                wandb.log({f"alpha_{dataset}": self.alphas_by_dataset[dataset][-1]})
+                wandb.log(
+                    {f"alpha_{dataset}": self.alphas_by_dataset[dataset][-1]})
             elif "language" in inputs:
-                language_alpha = self.alphas_by_language[language][-1] 
+                language_alpha = self.alphas_by_language[language][-1]
                 wandb.log({f"alpha_{language}": language_alpha})
-                
+
         if len(self.buffer) >= self.online_update_interval:
             self.model.train()  # switch back to training mode
 
-            input_ids = pad_to_2d([x[0] for x in self.buffer], 0)
+            input_ids = pad_to_2d(
+                [x[0] for x in self.buffer], self.tokenizer.pad_token_id)
             student_logits = self.get_logits(
                 model, input_ids, torch.ones_like(input_ids)
             ).float()
@@ -433,12 +438,13 @@ class DistillTrainer(Trainer):
         mix_ratio
     ):
         org_input_ids = input_ids.clone()
+
         def sample_token_from_logits(logits):
-            tau = 0.001 # argmax
+            tau = 0.001  # argmax
             distribution = torch.softmax(logits / tau, dim=-1)
             next_token_id = torch.multinomial(distribution, num_samples=1)
             return next_token_id
-    
+
         def generate_one(model, input_ids, attention_mask, past_key_values):
             if past_key_values is None:
                 outputs = model(
@@ -464,29 +470,30 @@ class DistillTrainer(Trainer):
             student_model, input_ids, attention_mask, None)
         teacher_first_token, teacher_key_values = generate_one(
             teacher_model, input_ids, attention_mask, None)
-        
+
         torch.manual_seed(1)
-        input_ids = student_first_token if random.random() < mix_ratio else teacher_first_token
+        input_ids = student_first_token if random.random(
+        ) < mix_ratio else teacher_first_token
         attention_mask = torch.cat([attention_mask, torch.ones(
-                bsz, 1, dtype=torch.long, device='cuda')], dim=1)
+            bsz, 1, dtype=torch.long, device='cuda')], dim=1)
 
         for i in range(max_new_tokens - 1):
             sample_model, past_key_values = (student_model, student_key_values) if random.random(
             ) < mix_ratio else (teacher_model, teacher_key_values)
-            next_token, _ = generate_one(sample_model, input_ids, 
-                                        attention_mask, past_key_values)
+            next_token, _ = generate_one(sample_model, input_ids,
+                                         attention_mask, past_key_values)
             input_ids = torch.cat([input_ids, next_token], dim=-1)
             attention_mask = torch.cat([attention_mask, torch.ones(
                 bsz, 1, dtype=torch.long, device='cuda')], dim=1)
 
         # mask eos
-        eos_positions = (input_ids == tokenizer.eos_token_id).nonzero(as_tuple=True)
+        eos_positions = (input_ids == tokenizer.eos_token_id).nonzero(
+            as_tuple=True)
         mask = torch.zeros_like(input_ids, dtype=torch.bool)
         for row, col in zip(*eos_positions):
             mask[row, col+1:] = True
         input_ids[mask] = tokenizer.pad_token_id
         return torch.cat((org_input_ids, input_ids), dim=-1).cuda()
-
 
     def get_logits(self, model, input_ids, attention_mask):
         return model(
