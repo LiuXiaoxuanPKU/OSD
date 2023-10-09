@@ -120,10 +120,10 @@ def main(student_model_path,
     )
 
     # take a subset
-    indices = range(len(eval_dataset))[-5:]
+    test_suite_size = 5
+    indices = range(len(eval_dataset))[-test_suite_size:]
     eval_dataset = eval_dataset.select(indices)
 
-    i = 0
     correctness = 0
     stats = torch.zeros(32000, dtype=torch.long, device='cuda')
     alpha, sample_steps = 0, 0
@@ -137,8 +137,6 @@ def main(student_model_path,
         correct_tokens = output.correct_tokens.squeeze(0)
         print(5097 in correct_tokens.tolist())
         stats[correct_tokens] = stats[correct_tokens] + 1
-        if i % 10 == 0:
-            print(f"{i}/{len(eval_dataset)}")
         print("===================================")
         print('Question:')
         print(tokenizer.decode(d["input_ids"], skip_special_tokens=True))
@@ -150,10 +148,7 @@ def main(student_model_path,
         correctness += output.correct_tokens.shape[-1]/output.propose_steps
         alpha += output.alpha_sum.item()
         sample_steps += output.sample_steps
-        i += 1
-        if i == 5:
-            break
-    print(i, correctness / i, alpha / sample_steps)
+    print(test_suite_size, correctness / test_suite_size, alpha / sample_steps)
 
 def model_generate(model_path, dataset, dataset_config_name=None):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -182,10 +177,10 @@ def model_generate(model_path, dataset, dataset_config_name=None):
     )
 
     # take a subset
-    indices = range(len(eval_dataset))[-5:]
+    test_suite_size = 5
+    indices = range(len(eval_dataset))[-test_suite_size:]
     eval_dataset = eval_dataset.select(indices)
 
-    i = 0
     for d in eval_dataset:
         max_tokens = 128
         input_ids = torch.Tensor(d["input_ids"]).long().reshape(1, -1).to(model.device)
@@ -196,10 +191,6 @@ def model_generate(model_path, dataset, dataset_config_name=None):
         print(f"Prompt: {tokenizer.decode(input_ids[0], skip_special_tokens=True)}")
         print(f"Answer: {tokenizer.decode(generated, skip_special_tokens=True)}")
         print("----------------------------------")
-        i += 1
-        if i == 5:
-            break
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

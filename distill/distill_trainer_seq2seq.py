@@ -30,7 +30,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         args = kwargs["args"]
         self.teacher_model = teacher_model
         self.generator = Seq2SeqGenerator(
-            self.model, self.teacher_model, self.tokenizer,propose_num
+            self.model, self.teacher_model, self.tokenizer,propose_num, is_encoder_decoder=True
         )
         print(self.tokenizer.name_or_path, self.model.name_or_path)
         self.train_step_cnt = 0
@@ -321,12 +321,10 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             input_ids = pad_to_2d([x[2] for x in self.buffer], 0)
             # mix-token not yet supported     
             if sample_student:
-                print('sampling from student...')
                 decoder_input_ids = pad_to_2d([x[3] for x in self.buffer], 0, 512)
             elif sample_mix_token:
                 raise NotImplementedError('mix token sampling for online training is not supported.')
             else:
-                print('sampling from teacher...')
                 decoder_input_ids = pad_to_2d([x[0] for x in self.buffer], 0, 512)
 
             student_logits = self.get_logits(
