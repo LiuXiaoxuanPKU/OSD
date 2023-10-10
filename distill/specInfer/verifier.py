@@ -5,13 +5,16 @@ from specInfer.common import (InputAndCache,
                               OutputAndCache,
                               crop_past_key_values,
                               crop_mqa_past_key_values,
+                              crop_past_key_values_seq2seq,
                               sychronize_time)
 from transformers import LogitsProcessorList
 import numpy as np
 
 
 class Verifier:
-    def __init__(self, model, tokenizer, benchmark_time=False) -> None:
+    def __init__(self, model, tokenizer,
+                 is_encoder_decoder=False,
+                 benchmark_time=False) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.prompt_inputs = None
@@ -23,16 +26,24 @@ class Verifier:
         self.adjust_input_time = 0
         self.benchmark_time = benchmark_time
 
+        self.is_encoder_decoder = is_encoder_decoder
+
     def verify(self, input: InputAndCache,
                propose_len: int,
                sample_method) -> Tuple[InputAndCache, torch.Tensor]:
         if self.benchmark_time:
             start = sychronize_time()
 
-        outputs = self.model(input_ids=input.input_ids,
-                             attention_mask=input.attention_mask,
-                             past_key_values=input.past_key_values,
-                             use_cache=True)
+        if self.is_encoder_decoder:
+            outputs = self.model(input_ids=input.input_ids,
+                                 decoder_input_ids=input.decoder_input_ids,
+                                 attention_mask=input.attention_mask,
+                                 past_key_values=input.past_key_values)
+        else:
+            outputs = self.model(input_ids=input.input_ids,
+                                 attention_mask=input.attention_mask,
+                                 past_key_values=input.past_key_values,
+                                 use_cache=True)
         next_token_scores = self.processor(input.input_ids, outputs.logits)
         generated_len = propose_len + 1
         logits = next_token_scores[:, -generated_len:, :]
@@ -52,24 +63,44 @@ class Verifier:
 
         if verifier_input.past_key_values is None:
             # concatenate proposed inputs with prompts
-            input_ids = torch.cat(
-                [verifier_input.input_ids, proposer_output.output_ids], dim=-1)
+            if self.is_encoder_decoder:
+                decoder_input_ids = torch.cat(
+                    [verifier_input.decoder_input_ids, proposer_output.output_ids], dim=-1)
+                attention_mask = verifier_input.attention_mask
+            else:
+                input_ids = torch.cat(
+                    [verifier_input.input_ids, proposer_output.output_ids], dim=-1)
+                # concatenate prompt masks with proposed token masks
+                attention_mask = torch.cat([verifier_input.attention_mask,
+                                            torch.ones_like(proposer_output.output_ids,
+                                                            dtype=torch.long, device="cuda")], dim=-1)
             # prompt phase, we don't have kv cache (past_key_values)
             past_key_values = None
-            # concatenate prompt masks with proposed token masks
-            attention_mask = torch.cat([verifier_input.attention_mask,
-                                        torch.ones_like(proposer_output.output_ids,
-                                                        dtype=torch.long, device="cuda")], dim=-1)
         else:
-            input_ids = torch.cat([verifier_input.input_ids.unsqueeze(
-                0), proposer_output.output_ids], dim=-1)
+            if self.is_encoder_decoder:
+                decoder_input_ids = torch.cat([verifier_input.decoder_input_ids.unsqueeze(
+                    0), proposer_output.output_ids], dim=-1)
+                attention_mask = verifier_input.attention_mask
+            else:
+                input_ids = torch.cat([verifier_input.input_ids.unsqueeze(
+                    0), proposer_output.output_ids], dim=-1)
+                attention_mask = torch.cat([verifier_input.attention_mask,
+                                            torch.ones_like(proposer_output.output_ids,
+                                                            dtype=torch.long, device="cuda")], dim=-1)
+
             past_key_values = verifier_input.past_key_values
-            attention_mask = torch.cat([verifier_input.attention_mask,
-                                        torch.ones_like(proposer_output.output_ids,
-                                                        dtype=torch.long, device="cuda")], dim=-1)
+
         if self.benchmark_time:
             self.prepare_input_time += sychronize_time() - start
-        return InputAndCache(input_ids, attention_mask, past_key_values)
+
+        if self.is_encoder_decoder:
+            return InputAndCache(verifier_input.input_ids,
+                                 attention_mask,
+                                 past_key_values,
+                                 verifier_input.labels,
+                                 decoder_input_ids)
+        else:
+            return InputAndCache(input_ids, attention_mask, past_key_values)
 
     def adjust_input(self,
                      accept_token_ids: torch.Tensor,
@@ -79,8 +110,6 @@ class Verifier:
             start = sychronize_time()
 
         n_matches = accept_token_ids.shape[1]
-        verifier_input_ids = accept_token_ids[:, -1]
-
         if str(self.model.__class__.__name__) in ["GPTBigCodeForCausalLM"]:
             verifier_generated_len = verifier_output.past_key_values[0].shape[-2] - (
                 verifier_output.generated_len - 1) + n_matches
@@ -89,18 +118,32 @@ class Verifier:
         else:
             verifier_generated_len = verifier_output.past_key_values[0][0].shape[2] - (
                 verifier_output.generated_len - 1) + n_matches
-            verifier_key_values = crop_past_key_values(
-                verifier_output.past_key_values, verifier_generated_len - 1)
+            if self.is_encoder_decoder:
+                verifier_key_values = crop_past_key_values_seq2seq(
+                    verifier_output.past_key_values, verifier_generated_len - 1)
+            else:
+                verifier_key_values = crop_past_key_values(
+                    verifier_output.past_key_values, verifier_generated_len - 1)
 
-        verifier_attn_masks = verifier_input.attention_mask[:,
-                                                            :verifier_generated_len]
-        if verifier_attn_masks.shape[1] < verifier_generated_len:
-            verifier_attn_masks = torch.cat([verifier_attn_masks,
-                                             torch.ones(verifier_attn_masks.shape[0], 1, dtype=torch.long, device="cuda")], dim=-1)
+                verifier_attn_masks = verifier_input.attention_mask[:,
+                                                                    :verifier_generated_len]
+                if verifier_attn_masks.shape[1] < verifier_generated_len:
+                    verifier_attn_masks = torch.cat([verifier_attn_masks,
+                                                    torch.ones(verifier_attn_masks.shape[0], 1, dtype=torch.long, device="cuda")], dim=-1)
 
         if self.benchmark_time:
             self.adjust_input_time += sychronize_time() - start
-        return InputAndCache(verifier_input_ids, verifier_attn_masks, verifier_key_values)
+
+        if self.is_encoder_decoder:
+            return InputAndCache(verifier_input.input_ids,
+                                 verifier_input.attention_mask,
+                                 verifier_key_values,
+                                 verifier_input.labels,
+                                 accept_token_ids[:, -1])
+        else:
+            return InputAndCache(accept_token_ids[:, -1],
+                                 verifier_attn_masks,
+                                 verifier_key_values)
 
     def print_time(self):
         if self.benchmark_time:
