@@ -3,7 +3,6 @@ from transformers import Trainer, Seq2SeqTrainer, TrainerCallback
 from transformers.trainer_pt_utils import LabelSmoother
 import wandb
 from specInfer.generator import Generator
-from specInfer.generator_seq2seq import Seq2SeqGenerator
 from specInfer.common import pad_to_2d
 
 from torch.utils.data import DataLoader
@@ -29,9 +28,12 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         super().__init__(*args, **kwargs)
         args = kwargs["args"]
         self.teacher_model = teacher_model
-        self.generator = Seq2SeqGenerator(
-            self.model, self.teacher_model, self.tokenizer,propose_num, is_encoder_decoder=True
+
+        self.sample_source = SAMPLE_SOURCE_MAP[args.sample_source]
+        self.generator = Generator(
+            self.model, self.teacher_model, self.tokenizer,propose_num, is_encoder_decoder=True, student_sampling=self.sample_source == SampleSource.Student
         )
+
         print(self.tokenizer.name_or_path, self.model.name_or_path)
         self.train_step_cnt = 0
 
@@ -43,7 +45,6 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         self.alphas = []
         self.sample_steps = []
 
-        self.sample_source = SAMPLE_SOURCE_MAP[args.sample_source]
         self.kl_method = KL_METHOD_MAP[args.kl_method]
     
     def training_step(self, model, inputs):
@@ -263,17 +264,14 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
             sample_student = False
         elif self.sample_source == SampleSource.Student:
             sample_student = True
-        elif self.sample_source == SampleSource.MixRequest:
-            sample_student = True if random.random() < student_request_ratio else False
-        elif self.sample_source == SampleSource.MixToken:
-            sample_mix_token = True
+        else:
+            raise NotImplementedError('online distillation only support teacher or student sampling.')
         
         # remove any masking
         input_ids =  inputs["input_ids"]
         # use speculative decoding to generate tokens
         attention_mask = inputs["attention_mask"]
-        output = self.generator.generate(input_ids, attention_mask,
-                                         max_new_tokens) 
+        output = self.generator.generate(input_ids, max_new_tokens, attention_mask=attention_mask) 
         debug = False
         if debug:
             ref_generated = self.get_generated_ids(self.teacher_model, 
@@ -294,8 +292,11 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         
         token_ids = output.generated_ids.clone().detach()
         token_ids = torch.cat([torch.zeros(1,1).long().cuda(), token_ids], dim=-1)
-        student_token_ids = output.student_generated_ids.clone().detach()
-        student_token_ids = torch.cat([torch.zeros(1,1).long().cuda(), student_token_ids], dim=-1)
+        if sample_student:
+            student_token_ids = output.student_generated_ids.clone().detach()
+            student_token_ids = torch.cat([torch.zeros(1,1).long().cuda(), student_token_ids], dim=-1)
+        else:
+            student_token_ids = None
 
         wrong_token_ids = [
             t for t in output.wrong_token_ids
