@@ -51,7 +51,7 @@ class DistillTrainer(Trainer):
         args = kwargs["args"]
         self.teacher_model = teacher_model
         self.generator = Generator(
-            self.model, self.teacher_model, self.tokenizer, args.max_propose_num
+            self.model, self.teacher_model, self.tokenizer, args.max_propose_num, False
         )
         self.train_step_cnt = 0
 
