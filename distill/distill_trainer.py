@@ -93,20 +93,6 @@ class DistillTrainer(Trainer):
         output = self.generator.generate(input_ids,
                                          max_new_tokens)
 
-        debug = False
-        if debug:
-            ref_generated = self.get_generated_ids(self.teacher_model,
-                                                   self.tokenizer,
-                                                   input_ids,
-                                                   torch.ones_like(input_ids),
-                                                   max_new_tokens, False)[0]
-            print(ref_generated)
-            print(self.tokenizer.batch_decode(ref_generated))
-            print(output.output)
-            print(output.alpha_sum)
-            print(output.sample_steps)
-            print("------")
-
         token_ids = torch.cat([input_ids, output.generated_ids], dim=-1)
         wrong_token_ids = [
             input_ids.shape[-1] + t for t in output.wrong_token_ids

@@ -197,7 +197,6 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
         # use speculative decoding to generate tokens
         attention_mask = inputs["attention_mask"]
         output = self.generator.generate(input_ids, max_new_tokens, attention_mask=attention_mask) 
-        debug = False
         
         token_ids = output.generated_ids.clone().detach()
         token_ids = torch.cat([torch.zeros(1,1).long().cuda(), token_ids], dim=-1)
