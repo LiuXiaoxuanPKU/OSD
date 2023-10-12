@@ -42,9 +42,9 @@ from fastchat.model.model_adapter import get_conversation_template
 from functools import partial
 
 # local import
-from distill.distill_trainer import DistillTrainer, DistillTrainerCallback
-from distill.distill_trainer_seq2seq import Seq2SeqDistillTrainer, Seq2SeqDistillTrainerCallback
-from distill.load_dataset import load_dataset
+from distill_trainer import DistillTrainer, DistillTrainerCallback
+from distill_trainer_seq2seq_without_gen import Seq2SeqDistillTrainer, Seq2SeqDistillTrainerCallback
+from load_dataset import load_dataset
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
@@ -236,8 +236,6 @@ def train():
         config=config,
         cache_dir=training_args.cache_dir,
     )
-    # # train from scratch
-    # model = transformers.LlamaForCausalLM(config)
 
     # teacher model
     teacher_config = transformers.AutoConfig.from_pretrained(

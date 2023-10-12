@@ -2,7 +2,6 @@ datapath=$1
 dataset_name=$2
 sample_source=$3
 kl=$4
-bsz=$5
 
 python distill/train_mlm.py \
     --student_model_path google/t5-efficient-small  \
@@ -15,7 +14,7 @@ python distill/train_mlm.py \
     --do_train \
     --num_train_epochs 1 \
     --online_eval_interval 10 \
-    --online_update_interval ${bsz} \
+    --online_update_interval 2 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 1 \

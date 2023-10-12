@@ -1,8 +1,6 @@
 datapath=$1
 dataset_name=$2
 sample_source=$3
-kl=$4
-bsz=$5
 gradient_step=$6s
 
 python distill/train_mlm.py \
@@ -16,9 +14,9 @@ python distill/train_mlm.py \
     --do_eval \
     --fast_eval \
     --num_train_epochs 3 \
-    --per_device_train_batch_size ${bsz} \
+    --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps ${gradient_step} \
+    --gradient_accumulation_steps 8 \
     --evaluation_strategy "steps" \
     --eval_steps 50 \
     --save_strategy "steps" \

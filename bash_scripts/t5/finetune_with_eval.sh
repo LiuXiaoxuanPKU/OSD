@@ -2,8 +2,6 @@ datapath=$1
 dataset_name=$2
 sample_source=$3
 kl=$4
-bsz=$5
-gradient_step=$6s
 
 python distill/train_mlm.py \
     --student_model_path google/t5-efficient-small  \
@@ -11,9 +9,9 @@ python distill/train_mlm.py \
     --dataset_name ${dataset_name} \
     --do_train \
     --num_train_epochs 3 \
-    --per_device_train_batch_size ${bsz} \
+    --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps ${gradient_step} \
+    --gradient_accumulation_steps 8 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 200 \
@@ -31,7 +29,7 @@ python distill/train_mlm.py \
     --output_dir $datapath/t5_${dataset_name}_finetune_${sample_source}_${kl}
 
 python distill/finetune_mlm.py \
-    --student_model_path $datapath/t5_${dataset_name}_finetune_${sample_source}_${kl}
+    --student_model_path $datapath/t5_${dataset_name}_finetune_${sample_source}_${kl} \
     --teacher_model_path google/t5-efficient-xl \
     --dataset_name ${dataset_name} \
     --do_predict \
