@@ -1,7 +1,6 @@
 datapath=$1
 dataset_name=$2
 sample_source=$3
-gradient_step=$6s
 
 python distill/train_mlm.py \
     --student_model_path google/t5-efficient-small  \
