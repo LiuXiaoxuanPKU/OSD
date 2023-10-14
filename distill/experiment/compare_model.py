@@ -29,7 +29,7 @@ def main(student_model_path,
     teacher_model = load_model(teacher_model_path)
     student_model = load_model(student_model_path)
     generator = Generator(student_model, teacher_model,
-                          tokenizer, max_propose_num)
+                          tokenizer, max_propose_num, False)
 
     eval_json = json.load(open(data_path, "r"))
     eval_dataset = LazySupervisedDataset(eval_json, tokenizer=tokenizer,

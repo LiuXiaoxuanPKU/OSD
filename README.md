@@ -28,6 +28,14 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+### Prepare data
+```
+cd data
+mkdir raw_data
+python clean_{dataset}.py
+```
+dataset can take the value of `spider`, `finance`, `code_search`, `gsm8k`.
+
 ### LLaMA
 1. Reproduce results from the paper:
 ```
