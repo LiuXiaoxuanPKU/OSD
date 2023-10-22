@@ -2,6 +2,7 @@ import torch
 import time
 
 from dataclasses import dataclass
+import numpy as np
 
 
 @dataclass
@@ -120,3 +121,13 @@ def pad_to_2d(tensor_list, pad_token_id, max_len=None):
         dim=0
     )
     return result
+
+def timeit(f, *args, **kwargs):
+    repeat = 10
+    ts = []
+    for i in range(repeat):
+        start_t = sychronize_time()
+        out = f(*args, **kwargs)
+        ts.append(sychronize_time() - start_t)
+    print(f"max: {max(ts)}\tmin: {min(ts)}\tmedian: {np.median(ts)}")
+    return out
