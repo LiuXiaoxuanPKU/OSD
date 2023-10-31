@@ -13,18 +13,7 @@ def time_evaluation(origin, compiled, input, forward=None, exp_name: str = '', w
     start_t1 = time.time() - s_t
     print(f"Normal firstly used time:{start_t1}s")
 
-    torch.cuda.synchronize()
-    s_t = time.time()
-    forward(compiled, input) if forward else compiled(input)
-    torch.cuda.synchronize()
-    start_t2 = time.time() - s_t
-    print(f"Compiled firstly used time:{start_t2}s")
-
-    assert warmup_time >= 1
-    for _ in range(warmup_time - 1):
-        forward(compiled, input) if forward else compiled(input)
-
-    t_1_total, t_2_total = [], []
+    t_1_total = []
     repeat = 10
     for i in range(repeat):
         torch.cuda.synchronize()
@@ -34,19 +23,11 @@ def time_evaluation(origin, compiled, input, forward=None, exp_name: str = '', w
         t_1 = time.time() - s_t
         t_1_total.append(t_1)
 
-        torch.cuda.synchronize()
-        s_t = time.time()
-        forward(compiled, input) if forward else compiled(input)
-        torch.cuda.synchronize()
-        t_2 = time.time() - s_t
-        t_2_total.append(t_2)
-
         # print(f"{i}:\n\tNormal used time:{t_1}s, \n\t"
         #       f"Compiled used time:{t_2}s")
 
-    print(f"{exp_name} runtime before first/avg compile: {start_t1}/{np.median(t_1_total)} s")
-    print(f"{exp_name} runtime after first/avg compile: {start_t2}/{np.median(t_2_total)} s")
-    print(f"{exp_name} successive runs speedup: {np.median(t_1_total) / np.median(t_2_total):.2f}")
+    print(f"{exp_name} first forward runtime: {start_t1} s")
+    print(f"{exp_name} successive runs speed: {np.median(t_1_total)}")
     
 
 
