@@ -19,8 +19,7 @@ conda activate osd
 2. Clone this repository and build from source:
 ```
 git clone https://github.com/LiuXiaoxuanPKU/OSD
-cd osd
-pip install -e .
+cd OSD
 ```
 3. Install dependency:
 ```
