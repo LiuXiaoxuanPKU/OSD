@@ -295,34 +295,24 @@ class LazySupervisedDataset(Dataset):
                          self.tokenizer,
                          self.model,
                          self.do_eval)
-        if "language" in self.raw_data[i]:
-            ret = dict(
+        
+        ret = dict(
                 input_ids=ret["input_ids"][0],
                 labels=ret["labels"][0],
                 attention_mask=ret["attention_mask"][0],
                 prompt_ids=ret["prompt_ids"][0],
-                prompt_attention_mask=ret["prompt_attention_mask"][0],
-                language=self.raw_data[i]["language"]
-            )
-        elif "dataset" in self.raw_data[i]:
-            ret = dict(
-                input_ids=ret["input_ids"][0],
-                labels=ret["labels"][0],
-                attention_mask=ret["attention_mask"][0],
-                prompt_ids=ret["prompt_ids"][0],
-                prompt_attention_mask=ret["prompt_attention_mask"][0],
-                dataset=self.raw_data[i]["dataset"]
-            )
-        else:
-            ret = dict(
-                input_ids=ret["input_ids"][0],
-                labels=ret["labels"][0],
-                attention_mask=ret["attention_mask"][0],
-                prompt_ids=ret["prompt_ids"][0],
-                prompt_attention_mask=ret["prompt_attention_mask"][0]
-            )
+                prompt_attention_mask=ret["prompt_attention_mask"][0])
+        customized_fields = ["language", "dataset", "topic"]
+        def get_customized_fields(d):
+            fields = []
+            for field in customized_fields:
+                if field in d:
+                    fields.append(field)
+            return fields
+        customized_fields = get_customized_fields(self.raw_data[i])
+        for field in customized_fields:
+            ret[field] = self.raw_data[i][field]
         self.cached_data_dict[i] = ret
-
         return ret
 
 
@@ -395,7 +385,8 @@ def train():
     else:
         teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
             model_args.teacher_model_path,
-            config=teacher_config
+            config=teacher_config,
+            torch_dtype=torch.bfloat16
         )
     teacher_model.cuda()
     print(

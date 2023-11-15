@@ -1,4 +1,4 @@
-from collectior import Collector
+from data.collector import Collector
 from transformers import AutoTokenizer
 
 

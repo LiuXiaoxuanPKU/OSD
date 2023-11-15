@@ -63,6 +63,7 @@ class DistillTrainer(Trainer):
         self.alphas = []
         self.alphas_by_dataset = {}
         self.alphas_by_language = {}
+        self.alphas_by_topic = {}
         self.sample_steps = []
 
         self.sample_source = SAMPLE_SOURCE_MAP[args.sample_source]
@@ -115,13 +116,19 @@ class DistillTrainer(Trainer):
         if "dataset" in inputs:
             self.alphas_by_dataset[dataset].append(
                 output.alpha_sum * 1.0 / output.sample_steps)
-        elif "language" in inputs:
+        if "language" in inputs:
             language = inputs["language"][0]
             if language not in self.alphas_by_language:
                 self.alphas_by_language[language] = []
             self.alphas_by_language[language].append(
                 output.alpha_sum*1.0/output.sample_steps)
-
+        if 'topic' in inputs:
+            topic = inputs['topic'][0]
+            if topic not in self.alphas_by_topic:
+                self.alphas_by_topic[topic] = []
+            self.alphas_by_topic[topic].append(
+                output.alpha_sum*1.0/output.sample_steps)
+            
         if self.train_step_cnt % self.online_eval_interval == 0:
             window_size = 1
             avg_alpha = (
@@ -133,9 +140,12 @@ class DistillTrainer(Trainer):
             if "dataset" in inputs:
                 wandb.log(
                     {f"alpha_{dataset}": self.alphas_by_dataset[dataset][-1]})
-            elif "language" in inputs:
+            if "language" in inputs:
                 language_alpha = self.alphas_by_language[language][-1]
                 wandb.log({f"alpha_{language}": language_alpha})
+            if "topic" in inputs:
+                topic_alpha = self.alphas_by_topic[topic][-1]
+                wandb.log({f"alpha_{topic}": topic_alpha})
 
         if len(self.buffer) >= self.online_update_interval:
             self.model.train()  # switch back to training mode

@@ -1,4 +1,4 @@
-from collectior import Collector
+from data.collector import Collector
 
 
 def transform(i, case):
