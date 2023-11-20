@@ -10,12 +10,9 @@ from functools import partial
 import numpy as np
 
 import argparse
-import json
-import pickle
 import torch
 from transformers import AutoTokenizer, AutoConfig, AutoModelForSeq2SeqLM
 from specInfer.generator import Generator
-from train import LazySupervisedDataset
 
 def preprocess_function_spider(examples, tokenizer, max_source_length, max_target_length, prefix="translate the following question into SQL. Please only generate SQL, don't include explanation in the answer: "):
     inputs = examples["question"]

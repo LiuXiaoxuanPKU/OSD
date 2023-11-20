@@ -3,12 +3,9 @@ from transformers import AutoTokenizer, LlamaForCausalLM
 from fastchat.model.model_adapter import get_conversation_template
 import torch
 from tqdm import tqdm
-
-model_path = "/data/vicuna-7b-v1.3/"
-model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', torch_dtype=torch.bfloat16)
-tokenizer = AutoTokenizer.from_pretrained(model_path)
+import argparse
     
-def generate_answer(prompt):
+def generate_answer(prompt, model, tokenizer):
     conv = get_conversation_template(model_path)
     conv.append_message(conv.roles[0], prompt)
     conv.append_message(conv.roles[1], "")
@@ -40,5 +37,15 @@ def main(filename):
         json.dump(data, f)
 
 if __name__ == "__main__":
-    filename = "/home/lily/spec_new/data/spider_train.json"
-    main(filename)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--filename", type=str,
+                        default="/home/azureuser/data/OSD/data/raw_data/spider_train.json")
+    parser.add_argument("--model", type=str,
+                        default="/home/azureuser/data/models/models--lmsys--vicuna-33b-v1.3/snapshots/ef8d6becf883fb3ce52e3706885f761819477ab4")
+    args = parser.parse_args()
+    filename = args.filename
+    model_path = args.model
+    model = LlamaForCausalLM.from_pretrained(model_path, device_map='auto', 
+                                             torch_dtype=torch.bfloat16)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    main(filename, model, tokenizer)
