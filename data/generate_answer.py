@@ -17,7 +17,7 @@ def generate_answer(prompt, model, tokenizer):
     return generated_str
 
 
-def main(filename):
+def main(filename, model, tokenizer):
     with open(filename) as f:
         data = json.load(f)
 
@@ -25,7 +25,7 @@ def main(filename):
         assert len(d["conversation"]) == 1
         
         prompt = d["conversation"][0]["content"]
-        answer = generate_answer(prompt)
+        answer = generate_answer(prompt, model, tokenizer)
         d["conversation"].append(
             {
                 "role" : "assistant",
