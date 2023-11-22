@@ -16,7 +16,7 @@ import random
 
 import typing
 
-from .distill_trainer import SampleSource, SAMPLE_SOURCE_MAP, KLMethod, KL_METHOD_MAP
+from distill_trainer import SampleSource, SAMPLE_SOURCE_MAP, KLMethod, KL_METHOD_MAP
 
 eval_cnt = 0
 
@@ -274,7 +274,7 @@ class Seq2SeqDistillTrainer(Seq2SeqTrainer):
     
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output = self.generator.generate(inputs["input_ids"], inputs["attention_mask"], 200)
+        output = self.generator.generate(inputs["input_ids"], attention_mask=inputs["attention_mask"], max_tokens=200)
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, Seq2SeqDistillTrainerCallback):

@@ -1,14 +1,15 @@
 datapath=$1
 dataset_name=$2
 sample_source=$3
+kl=$4
 
 python distill/train_mlm.py \
-    --student_model_path google/t5-efficient-small  \
+    --student_model_path google/t5-efficient-base  \
     --teacher_model_path google/flan-t5-xl \
     --dataset_name ${dataset_name} \
     --mode offline \
     --sample_source ${sample_source} \
-    --kl_method forward \
+    --kl_method ${kl} \
     --do_train \
     --do_eval \
     --fast_eval \

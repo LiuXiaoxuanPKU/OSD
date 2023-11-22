@@ -26,9 +26,9 @@ from fastchat.model.model_adapter import get_conversation_template
 from functools import partial
 
 # local import
-from distill.distill_trainer import DistillTrainer, DistillTrainerCallback
-from distill.distill_trainer_seq2seq import Seq2SeqDistillTrainer, Seq2SeqDistillTrainerCallback
-from distill.data import load_gsm8k, preprocess_function_gsm8k, preprocess_function_spider, preprocess_function_ende, preprocess_function_finance, preprocess_function_python, preprocess_function_generic, load_dataset_with_answers
+from distill_trainer import DistillTrainer, DistillTrainerCallback
+from distill_trainer_seq2seq import Seq2SeqDistillTrainer, Seq2SeqDistillTrainerCallback
+from data import load_gsm8k, preprocess_function_gsm8k, preprocess_function_spider, preprocess_function_ende, preprocess_function_finance, preprocess_function_python, preprocess_function_generic, load_dataset_with_answers
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
@@ -98,6 +98,7 @@ def load_dataset(data_args, training_args, tokenizer):
             preprocess_function,
             tokenizer=tokenizer,
             args=data_args,
+            train_args=training_args,
             prefix=prefix
         )
 
