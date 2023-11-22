@@ -60,6 +60,18 @@ def load_dataset(data_args, training_args, tokenizer):
             data_args.dataset_name,
             data_args.dataset_config_name,
         )
+    elif data_args.dataset_name == 'code_search_net':
+        preprocess_function = preprocess_function_python
+        raw_datasets = datasets.load_dataset(
+            data_args.dataset_name,
+            data_args.dataset_config_name,
+        )
+    elif data_args.dataset_name == 'gbharti/finance-alpaca':
+        preprocess_function = preprocess_function_finance
+        raw_datasets = datasets.load_dataset(
+            data_args.dataset_name,
+            data_args.dataset_config_name,
+        )
     elif data_args.dataset_name == 'gsm8k_with_answers':
         preprocess_function = preprocess_function_gsm8k
         train_dataset = load_dataset_with_answers(train_path=os.path.join(os.getcwd(), 'data/gsm8k_with_answer_t5.jsonl'))
