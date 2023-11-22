@@ -40,6 +40,8 @@ def load_dataset(data_args, training_args, tokenizer):
 
     global preprocess_function_gsm8k
     global preprocess_function_spider
+    global preprocess_function_finance
+    global preprocess_function_python
     global load_dataset_with_answers
     
     if data_args.dataset_name == 'gsm8k':
@@ -79,11 +81,9 @@ def load_dataset(data_args, training_args, tokenizer):
         preprocess_function = preprocess_function_spider
         train_dataset = load_dataset_with_answers(train_path=os.path.join(os.getcwd(), 'data/spider_with_answer_t5.jsonl'))
     elif data_args.dataset_name == 'finance_with_answers':
-        global preprocess_function_finance
         preprocess_function = preprocess_function_finance
         train_dataset = load_dataset_with_answers(train_path=os.path.join(os.getcwd(), 'data/gbharti/finance-alpaca_with_answer_t5.jsonl'))
     elif data_args.dataset_name == 'python_with_answers':
-        global preprocess_function_python
         preprocess_function = preprocess_function_python
         train_dataset = load_dataset_with_answers(train_path=os.path.join(os.getcwd(), 'data/code_search_net_with_answer_t5.jsonl'))
     else:
