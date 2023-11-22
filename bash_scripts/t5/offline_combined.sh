@@ -1,3 +1,7 @@
+datapath=$1
+sample_source=$2
+kl=$3
+
 python distill/train_mlm.py \
     --student_model_path google/t5-efficient-large  \
     --teacher_model_path google/flan-t5-xl \

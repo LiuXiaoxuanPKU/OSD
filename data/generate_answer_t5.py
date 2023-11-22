@@ -9,8 +9,6 @@ import datasets
 
 import os
 
-from 
-
 model_path = "google/flan-t5-xl"
 model = AutoModelForSeq2SeqLM.from_pretrained(model_path).to("cuda")
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -23,8 +21,8 @@ def generate_answer(prompt, prefix=''):
     generated_str = tokenizer.decode(generated)
     return prompt, generated_str
 
-def main(dataset_name):
-    trainset = datasets.load_dataset(dataset_name,)['train']
+def main(dataset_name, dataset_config_name):
+    trainset = datasets.load_dataset(dataset_name, dataset_config_name)['train']
 
     def mapping(d):
         question = d.pop('question')
@@ -43,5 +41,6 @@ def main(dataset_name):
     trainset.to_json(new_path)
 
 if __name__ == "__main__":
-    dataset_name = 'spider'
-    main(dataset_name)
+    dataset_name = 'gsm8k'
+    dataset_config_name = 'main'
+    main(dataset_name, dataset_config_name)

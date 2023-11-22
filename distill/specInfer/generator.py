@@ -218,10 +218,6 @@ class Generator:
             if self.benchmark_time:
                 self.generation_time.append(sychronize_time() - start)
 
-            print(generated_token_cnt)
-            print(max_tokens)
-            print(self.tokenizer.eos_token_id)
-            print(accept_token_ids)
             if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
                 break
 
