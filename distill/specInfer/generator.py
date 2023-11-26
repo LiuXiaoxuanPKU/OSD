@@ -133,10 +133,10 @@ class Generator:
                 attention_mask,
                 None,
                 labels,
-                torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).to(self.model.device).long())
+                torch.Tensor([self.model.config.decoder_start_token_id]).expand(input_ids.shape[0], 1).long())
         else:
             proposer_input = InputAndCache(
-                input_ids, attention_mask, None)
+            input_ids, torch.ones_like(input_ids), None)
         
         verifier_input = copy.deepcopy(proposer_input)
         if self.student_sampling:

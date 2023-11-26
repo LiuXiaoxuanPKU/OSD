@@ -2,9 +2,9 @@ datapath=$1
 sample=$2
 kl=$3
 
-python distill/train.py \
-    --student_model_path $datapath/llama-160m \
-    --teacher_model_path $datapath/vicuna-7b-v1.3/ \
+python3 distill/train.py \
+    --student_model_path JackFram/llama-160m \
+    --teacher_model_path lmsys/vicuna-7b-v1.3 \
     --data_path data/raw_data/spider_train_with_answer.json \
     --eval_data_path data/raw_data/spider_validation.json \
     --max_propose_num 5 \

@@ -20,12 +20,26 @@ import math
 import pathlib
 from typing import Dict, Optional, Sequence
 
+import functools
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 import transformers
-from transformers.trainer_pt_utils import LabelSmoother
+from transformers.trainer_pt_utils import LabelSmoother, get_module_class_from_name
 from fastchat.model.model_adapter import get_conversation_template
+
+from torch.distributed.fsdp import (
+   FullyShardedDataParallel,
+   CPUOffload,
+)
+
+from torch.distributed.fsdp.wrap import (
+   size_based_auto_wrap_policy,
+   transformer_auto_wrap_policy,
+)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+from typing import Dict
 
 from distill_trainer import DistillTrainer, DistillTrainerCallback
 
@@ -386,11 +400,23 @@ def train():
         teacher_model = transformers.AutoModelForCausalLM.from_pretrained(
             model_args.teacher_model_path,
             config=teacher_config,
-            torch_dtype=torch.bfloat16
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+            device_map='cuda',
         )
-    teacher_model.cuda()
-    print(
-        f"Teacher Model memory: {teacher_model.get_memory_footprint() / 1024 / 1024} MB")
+
+    transformer_cls_to_wrap = set()
+    transformer_cls = get_module_class_from_name(model, "LlamaDecoderLayer")
+    transformer_cls_to_wrap.add(transformer_cls)
+    auto_wrap_policy = functools.partial(
+        transformer_auto_wrap_policy,
+        # Transformer layer class to wrap
+        transformer_layer_cls=transformer_cls_to_wrap,
+    )
+    teacher_model = FSDP(
+        teacher_model,
+        auto_wrap_policy=auto_wrap_policy,
+    )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.teacher_model_path,

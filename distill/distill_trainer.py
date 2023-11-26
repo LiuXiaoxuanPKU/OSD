@@ -352,16 +352,17 @@ class DistillTrainer(Trainer):
 
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output = self.generator.generate(inputs["input_ids"], 128)
-        find = False
-        for callback in self.callback_handler.callbacks:
-            if isinstance(callback, DistillTrainerCallback):
-                callback.correct_cnt += output.correct_tokens.shape[-1]
-                callback.propose_cnt += output.propose_steps
-                callback.alpha += output.alpha_sum
-                callback.sample_steps += output.sample_steps
-                find = True
-        assert find
+        if self.args.local_rank == 0:
+            output = self.generator.generate(inputs["input_ids"], 128)
+            find = False
+            for callback in self.callback_handler.callbacks:
+                if isinstance(callback, DistillTrainerCallback):
+                    callback.correct_cnt += output.correct_tokens.shape[-1]
+                    callback.propose_cnt += output.propose_steps
+                    callback.alpha += output.alpha_sum
+                    callback.sample_steps += output.sample_steps
+                    find = True
+            assert find
 
         return None, None, None
 
@@ -508,15 +509,16 @@ class DistillTrainerCallback(TrainerCallback):
         self.sample_steps = 0
 
     def on_evaluate(self, args, state, control, **kwargs):
-        global eval_cnt
-        print(f"[{eval_cnt}] {self.correct_cnt}/{self.propose_cnt}")
+        if args.local_rank == 0:
+            global eval_cnt
+            print(f"[{eval_cnt}] {self.correct_cnt}/{self.propose_cnt}")
 
-        if self.correct_cnt > 0:
-            with open("out", "a") as f:
-                f.write(f"[{eval_cnt}] {self.correct_cnt}/{self.propose_cnt}\n")
-            wandb.log(
-                {"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
-            wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
+            if self.correct_cnt > 0:
+                with open("out", "a") as f:
+                    f.write(f"[{eval_cnt}] {self.correct_cnt}/{self.propose_cnt}\n")
+                wandb.log(
+                    {"generated_token": self.correct_cnt * 1.0 / self.propose_cnt})
+                wandb.log({"alpha": self.alpha * 1.0 / self.sample_steps})
 
         eval_cnt += 1
         self.correct_cnt = 0

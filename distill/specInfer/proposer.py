@@ -62,7 +62,7 @@ class RandomProposer(Proposer):
         pass
 
     def propose_impl(self, input: InputAndCache, n: int) -> OutputAndCache:
-        return OutputAndCache(1, torch.randint(0, 32000, (1, 16), device='cuda'), None)
+        return OutputAndCache(1, torch.randint(0, 32000, (1, 16), device="cuda"), None)
 
     def adjust_input_impl(self, accept_token_ids: torch.Tensor,
                           proposer_input: InputAndCache,
