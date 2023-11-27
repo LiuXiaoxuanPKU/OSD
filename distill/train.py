@@ -135,7 +135,7 @@ def preprocess(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
     model: str,
-    do_eval: bool
+    do_eval: bool,
 ) -> Dict:
     if ("llama" in model.lower()) or ("starcoder" in model.lower()):
         # does not support multi-round conversation for llama
