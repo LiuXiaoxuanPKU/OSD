@@ -405,6 +405,7 @@ def train():
             device_map='cuda',
         )
 
+    # -------- teacher model FSDP inference ------- #
     transformer_cls_to_wrap = set()
     transformer_cls = get_module_class_from_name(model, "LlamaDecoderLayer")
     transformer_cls_to_wrap.add(transformer_cls)

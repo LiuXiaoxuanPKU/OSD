@@ -3,8 +3,8 @@ sample=$2
 kl=$3
 
 torchrun --nproc_per_node=8 distill/train.py \
-    --student_model_path JackFram/llama-160m \
-    --teacher_model_path lmsys/vicuna-7b-v1.3 \
+    --student_model_path models/llama-160m \
+    --teacher_model_path models/vicuna-7b-v1.3 \
     --data_path data/raw_data/spider_train_with_answer.json \
     --max_propose_num 5 \
     --bf16 True \
