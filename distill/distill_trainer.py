@@ -263,6 +263,7 @@ class DistillTrainer(Trainer):
         else:
             attention_mask = inputs["attention_mask"]
             output_mask = inputs["labels"][..., 1:] == IGNORE_TOKEN_ID
+        
         if debug:
             print(f"Prepare time: {sychronize_time() - prepare_time_start}")
 

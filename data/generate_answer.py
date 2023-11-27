@@ -39,9 +39,9 @@ def main(filename, model, tokenizer):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--filename", type=str,
-                        default="/home/azureuser/data/OSD/data/raw_data/spider_train.json")
+                        default="data/raw_data/spider_train.json")
     parser.add_argument("--model", type=str,
-                        default="/home/azureuser/data/models/models--lmsys--vicuna-33b-v1.3/snapshots/ef8d6becf883fb3ce52e3706885f761819477ab4")
+                        default="lmsys/vicuna-7b-v1.3")
     args = parser.parse_args()
     filename = args.filename
     model_path = args.model
