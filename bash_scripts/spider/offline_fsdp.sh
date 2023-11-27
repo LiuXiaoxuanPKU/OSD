@@ -10,9 +10,9 @@ torchrun --nproc_per_node=2 distill/train.py \
     --bf16 True \
     --output_dir $datapath/spider_${sample}_${kl} \
     --num_train_epochs 2 \
-    --per_device_train_batch_size 2 \
+    --per_device_train_batch_size 32 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 16 \
+    --gradient_accumulation_steps 4 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 50 \
