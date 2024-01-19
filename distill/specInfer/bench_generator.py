@@ -21,7 +21,8 @@ class GeneratorOutput:
     sample_steps: int
     alpha_sum: float
     wrong_token_ids: List[int]
-    student_generated_ids: torch.tensor = None
+    student_generated_ids: torch.tensor = None,
+    prob_list: List[float] = None
 
 
 class Generator:
@@ -74,12 +75,29 @@ class Generator:
         all_accepted = True
         sample_steps = 0
         alpha = 0
+
+        prob_list = []
         for t in range(proposed_output.generated_len):
+            #print(verified_output.output_distribution.shape)
+            #print(verified_output.output_distribution[t, :])
+            #print(proposed_output.output_distribution[t, :])
+            max_elem = torch.max(proposed_output.output_distribution[t, :], dim=-1)
+            max_prob_index = max_elem.indices
+            #print(f'sum: {proposed_output.output_distribution[t, :].sum(dim=-1)}')
+            #print(max_prob_index)
+            #print(proposed_output.output_distribution[t, max_prob_index])
+            max_prob = max_elem.values.item()
+            #print(max_prob)
+            prob_list.append(max_prob)
+
+        for t in range(proposed_output.generated_len):
+
             sampled_ratios = (
                 verified_output.output_distribution[t,
                                                     proposed_output.output_ids[0, t]]
                 / proposed_output.output_distribution[t, proposed_output.output_ids[0, t]]
             )
+
             sampled_ratios = torch.min(sampled_ratios,
                                        torch.ones_like(sampled_ratios))
             rs = torch.rand_like(sampled_ratios)
@@ -110,7 +128,7 @@ class Generator:
             accept_ids.append(next_token_id)
 
         accept_ids = torch.cat(accept_ids, dim=0)
-        return accept_ids.unsqueeze(0), alpha, sample_steps
+        return accept_ids.unsqueeze(0), alpha, sample_steps, prob_list
 
     @torch.inference_mode()
     def generate(self, input_ids, max_tokens, temperature=0.01, attention_mask=None, labels=None):
@@ -174,7 +192,7 @@ class Generator:
 
             # compare selected tokens
             # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
-            accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
+            accept_token_ids, cur_alpha, cur_sample_steps, prob_list = self.sample_tokens(
                 proposer_output, verifier_output)
             alpha += cur_alpha
             sample_steps += cur_sample_steps
@@ -235,7 +253,8 @@ class Generator:
                                sample_steps,
                                alpha,
                                wrong_token_ids,
-                               student_generated_tokens)
+                               student_generated_tokens,
+                               prob_list)
 
     def print_time(self):
         if self.benchmark_time:

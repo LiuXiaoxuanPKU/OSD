@@ -43,10 +43,10 @@ def main(student_model_path,
     vocab_size = len(tokenizer.get_vocab())
     stats = torch.zeros(vocab_size, dtype=torch.long, device='cuda')
     alpha, sample_steps = 0, 0
-    for s in tqdm(range(len(eval_dataset)//60)):
+    for s in tqdm(range(len(eval_dataset)//30)):
         d = eval_dataset[s]
         if i % 10 == 0:
-            print(f"{i}/{len(eval_dataset)}")
+            print(f"data: {i}/{len(eval_dataset)}")
         max_tokens = 10
         correctness_i = 0
         avg_correctness_i = 0
@@ -56,12 +56,17 @@ def main(student_model_path,
         prompt_ids = d["input_ids"].reshape(1, -1).cuda()
         input_ids = prompt_ids
         eos_flag = False
+        prompt_len = len(prompt_ids[0])
         result = {'prompt': tokenizer.decode(prompt_ids[0], end="\n\n")}
+        result['prompt_len'] = prompt_len
         len_to_rate_mapper = {}
         
-        iter_counter = 1
+        iter_counter = 0
+        gen_len = prompt_len
+        sd_records = []
         while not eos_flag:
-            output = generator.generate(input_ids, max_tokens, temperature=0.01)
+            output = generator.generate(input_ids, max_tokens, temperature=1.0)
+
             correct_tokens = output.correct_tokens.squeeze(0)
             stats[correct_tokens] = stats[correct_tokens] + 1
             #if i % 10 == 0:
@@ -95,20 +100,34 @@ def main(student_model_path,
 
             prompt_len = input_ids.shape[-1]
 
-            all_rates = {}
-            for c in range(1, max_tokens+1):
-                if correct_cnt > c:
-                    rate = 1
-                else:
-                    rate = correct_cnt / c
-                all_rates[c] = rate
+            #all_rates = {}
+            #for c in range(1, max_tokens+1):
+            #    if correct_cnt > c:
+            #        rate = 1
+            #    else:
+            #        rate = correct_cnt / c
+            #    all_rates[c] = rate
 
-            len_to_rate_mapper[prompt_len] = all_rates
+            #len_to_rate_mapper[prompt_len] = all_rates
             #print(len_to_rate_mapper[prompt_len])
 
+            record_i = {}
+            record_i['gen_idx'] = iter_counter
+            record_i['accepted_len'] = correct_cnt
+
+            prob_list = output.prob_list
+            record_i['confidences'] = prob_list
+
+            sd_records.append(record_i)
+
+            gen_len += len(output.generated_ids)
             iter_counter += 1
 
-        result['prompt_length_to_alpha_map'] = len_to_rate_mapper
+        result['gen_len'] = gen_len
+        result['sd_records'] = sd_records
+
+        #result['prompt_length_to_alpha_map'] = len_to_rate_mapper
+
         result['avg_correct_count'] = correctness_i
         result['avg_alpha'] = alpha_i.item()/sample_steps_i
         alpha_data.append(result)
@@ -127,8 +146,8 @@ def main(student_model_path,
     # alpha / sample steps: average alpha per sample step (per propose)
     print(f'total data points: {i}, average correct tokens per propose step: {correctness / i}, average alpha per sample step: {alpha.item() / sample_steps}')
 
-    with open('chatbot_arena_all_token_acceptance_rate_for_simulation.json', 'wb') as f_write:
-         pickle.dump(alpha_data, f_write)
+    with open('chatbot_arena_all_token_acceptance_rate_for_simulation_temp_1p0.json', 'w') as f_write:
+         json.dump(alpha_data, f_write, indent = 4)
 
 def model_generate(model_path, data_path):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -163,13 +182,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--student", type=str,
                         help="student model path",
-                        default="JackFram/llama-160m")
+                        default="/home/lanxiang/MIT/LLMs_and_TVM/specd/OSD/models/llama-160m")
     parser.add_argument("--teacher", type=str,
                         help="teacher model path",
-                        default="/home/hao.zhang/lanxiang/models/vicuna-7b-v1.5")
+                        default="/home/lanxiang/MIT/LLMs_and_TVM/specd/OSD/models/vicuna-7b-v1.3")
     parser.add_argument("--data", type=str,
                         help="data path",
-                        default="/home/hao.zhang/lanxiang/OSD/data/raw_data/chatbot_arena_token_acceptance_rate_testing.json")
+                        default="/home/lanxiang/MIT/LLMs_and_TVM/specd/OSD/data/raw_data/chatbot_arena_token_acceptance_rate_testing.json")
     parser.add_argument("--max_propose_num", type=int,
                         help="number of proposed tokens",
                         default=10)

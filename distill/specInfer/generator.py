@@ -74,6 +74,7 @@ class Generator:
         all_accepted = True
         sample_steps = 0
         alpha = 0
+
         for t in range(proposed_output.generated_len):
             sampled_ratios = (
                 verified_output.output_distribution[t,
@@ -220,6 +221,9 @@ class Generator:
 
             if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
                 break
+            
+            # forced break for profiling purpose
+            break
 
         self.proposer.print_time()
         self.verifier.print_time()
