@@ -37,7 +37,7 @@ def transform_dataset(data_name):
         new_d_2['winner'] = win_flag_b
 
         all_data.append(new_d_1)
-        all_data.append(new_d_2)
+        #all_data.append(new_d_2)
 
     with open('raw_data/chatbot_arena_token_acceptance_rate_testing.json', 'w') as f_merged:
         json.dump(all_data, f_merged)
