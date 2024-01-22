@@ -69,6 +69,8 @@ def main(student_model_path,
 
             correct_tokens = output.correct_tokens.squeeze(0)
             stats[correct_tokens] = stats[correct_tokens] + 1
+            
+            # sanity check for generation quality
             #if i % 10 == 0:
             #    print(f"{i}/{len(eval_dataset)}")
             #print("===================================")
@@ -80,6 +82,7 @@ def main(student_model_path,
             #print(correct_tokens.shape)
             #print(output.propose_steps, correct_tokens.shape[-1]/output.propose_steps)
             #print("===================================")
+
             correct_cnt = output.correct_tokens.shape[-1]
             propose_steps_i += output.propose_steps
             correct_count_i += correct_cnt
@@ -88,12 +91,6 @@ def main(student_model_path,
 
             alpha_i += output.alpha_sum
             sample_steps_i += output.sample_steps
-            #print(f'propose step: {output.propose_steps}')
-            #print(f'correct count: {correct_cnt}')
-            #print(f'avg correctness: {correctness_i}')
-            #print(f'single avg alpha: {output.alpha_sum/output.sample_steps}')
-            #print(f'avg alpha: {alpha_i/sample_steps_i}')
-            #print('update input ids, append one token...')
             input_ids = torch.cat((input_ids, output.generated_ids[..., :1]), dim=-1)
             if tokenizer.eos_token_id in output.generated_ids:
                 eos_flag = True
@@ -138,15 +135,14 @@ def main(student_model_path,
         sample_steps += sample_steps_i
 
         i += 1
-        #if i == 1:
-        #    break
+
     # propose step: each step proposes a n-gram
     # sample step: single generation by student
     # correctness / i: average correct tokens per propose step (multiple tokens)
     # alpha / sample steps: average alpha per sample step (per propose)
     print(f'total data points: {i}, average correct tokens per propose step: {correctness / i}, average alpha per sample step: {alpha.item() / sample_steps}')
 
-    with open('chatbot_arena_all_token_acceptance_rate_for_simulation_temp_1p0.json', 'w') as f_write:
+    with open('vicuna160m_chatbot_arena_all_token_acceptance_rate_for_simulation_temp_1p0.json', 'w') as f_write:
          json.dump(alpha_data, f_write, indent = 4)
 
 def model_generate(model_path, data_path):
@@ -182,13 +178,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--student", type=str,
                         help="student model path",
-                        default="/home/lanxiang/MIT/LLMs_and_TVM/specd/OSD/models/llama-160m")
+                        default="models/vicuna-160m")
     parser.add_argument("--teacher", type=str,
                         help="teacher model path",
-                        default="/home/lanxiang/MIT/LLMs_and_TVM/specd/OSD/models/vicuna-7b-v1.3")
+                        default="models/vicuna-7b-v1.3")
     parser.add_argument("--data", type=str,
                         help="data path",
-                        default="/home/lanxiang/MIT/LLMs_and_TVM/specd/OSD/data/raw_data/chatbot_arena_token_acceptance_rate_testing.json")
+                        default="data/raw_data/chatbot_arena_token_acceptance_rate_testing.json")
     parser.add_argument("--max_propose_num", type=int,
                         help="number of proposed tokens",
                         default=10)
