@@ -59,7 +59,7 @@ def main(student_model_path,
         prompt_len = len(prompt_ids[0])
         result = {'prompt': tokenizer.decode(prompt_ids[0], end="\n\n")}
         result['prompt_len'] = prompt_len
-        len_to_rate_mapper = {}
+        #len_to_rate_mapper = {}
         
         iter_counter = 0
         gen_len = prompt_len
@@ -145,34 +145,6 @@ def main(student_model_path,
     with open('vicuna160m_chatbot_arena_all_token_acceptance_rate_for_simulation_temp_1p0.json', 'w') as f_write:
          json.dump(alpha_data, f_write, indent = 4)
 
-def model_generate(model_path, data_path):
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    tokenizer.pad_token = tokenizer.unk_token
-    model = load_model(model_path)
-    param_sum = 0
-    for param in model.parameters():
-        param_sum += param.data.sum()
-    print(f"Param Sum: {param_sum}")
-    
-    eval_json = json.load(open(data_path, "r"))
-    eval_dataset = LazySupervisedDataset(eval_json, tokenizer=tokenizer,
-                                         model=model_path, do_eval=True)
-
-    i = 0
-    for d in eval_dataset:
-        max_tokens = 512
-        input_ids = d["input_ids"].reshape(1, -1).cuda()
-        generated = model.generate(input_ids,
-                                   max_new_tokens=max_tokens)[
-            0][input_ids.shape[-1]:]
-        print(f"Prompt: {tokenizer.decode(input_ids[0])}")
-        print("--")
-        print(f"Answer: {tokenizer.decode(generated)}")
-        print("----------------------------------")
-        i += 1
-        if i == 3:
-            break
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -191,4 +163,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args.student, args.teacher, args.max_propose_num, args.data)
-    # model_generate(args.student, args.data)
