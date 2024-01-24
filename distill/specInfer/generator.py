@@ -22,6 +22,9 @@ class GeneratorOutput:
     alpha_sum: float
     wrong_token_ids: List[int]
     student_generated_ids: torch.tensor = None
+    
+    student_logits: List[torch.tensor] = None
+    teacher_logits: List[torch.tensor] = None
 
 
 class Generator:
@@ -145,6 +148,7 @@ class Generator:
         correct_tokens = None
         propose_steps = 0
         alpha, sample_steps = 0, 0
+        student_logits, teacher_logits = [], []
         while True:
             start = sychronize_time()
             # propose n tokens, proposer always propose the token with highest probability
@@ -153,7 +157,7 @@ class Generator:
                 self.max_propose_num,
                 sample_method)
             propose_steps += 1
-
+            student_logits.append(proposer_output.output_logits)
 
             if self.student_sampling:
                 student_proposer_output = self.proposer.propose(
@@ -171,6 +175,7 @@ class Generator:
                 verifier_input,
                 proposer_output.generated_len,
                 sample_method)
+            teacher_logits.append(verifier_output.output_logits)
 
             # compare selected tokens
             # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
@@ -231,7 +236,9 @@ class Generator:
                                sample_steps,
                                alpha,
                                wrong_token_ids,
-                               student_generated_tokens)
+                               student_generated_tokens,
+                               student_logits,
+                               teacher_logits)
 
     def print_time(self):
         if self.benchmark_time:
