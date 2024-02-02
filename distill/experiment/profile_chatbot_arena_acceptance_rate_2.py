@@ -44,7 +44,7 @@ def main(student_model_path,
     stats = torch.zeros(vocab_size, dtype=torch.long, device='cuda')
     alpha, sample_steps = 0, 0
     unit_length = len(eval_dataset)//90
-    for s in tqdm(range(unit_length)):
+    for s in tqdm(range(unit_length, unit_length*2)):
         d = eval_dataset[s]
         if i % 10 == 0:
             print(f"data: {i}/{len(eval_dataset)}")
@@ -143,7 +143,7 @@ def main(student_model_path,
     # alpha / sample steps: average alpha per sample step (per propose)
     print(f'total data points: {i}, average correct tokens per propose step: {correctness / i}, average alpha per sample step: {alpha.item() / sample_steps}')
 
-    with open('vicuna160m_chatbot_arena_all_token_acceptance_rate_for_simulation_temp_0p001_unit1.json', 'w') as f_write:
+    with open('vicuna160m_chatbot_arena_all_token_acceptance_rate_for_simulation_temp_0p001_unit2.json', 'w') as f_write:
          json.dump(alpha_data, f_write, indent = 4)
 
 
