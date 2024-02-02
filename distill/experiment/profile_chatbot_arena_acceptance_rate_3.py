@@ -143,7 +143,7 @@ def main(student_model_path,
     # alpha / sample steps: average alpha per sample step (per propose)
     print(f'total data points: {i}, average correct tokens per propose step: {correctness / i}, average alpha per sample step: {alpha.item() / sample_steps}')
 
-    with open('vicuna160m_chatbot_arena_all_token_acceptance_rate_for_simulation_temp_0p001_unit2.json', 'w') as f_write:
+    with open('vicuna160m_chatbot_arena_all_token_acceptance_rate_for_simulation_temp_0p001_unit3.json', 'w') as f_write:
          json.dump(alpha_data, f_write, indent = 4)
 
 

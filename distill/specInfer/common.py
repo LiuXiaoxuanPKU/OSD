@@ -24,6 +24,9 @@ class OutputAndCache:
     output_distribution: torch.Tensor
     past_key_values: torch.Tensor
 
+    # bench-only field
+    proposer_prob_list: list = None
+
 
 ########################### Sampling ########################
 def target_sample_from_distribution(target_distribution, draft_distribution):

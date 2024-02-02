@@ -1,7 +1,7 @@
 import torch
 from specInfer.common import (OutputAndCache,
                               target_sample_from_distribution)
-from specInfer.proposer import SmallModelProposer, SmallModelKVCacheProposer
+from specInfer.bench_proposer import SmallModelProposer, SmallModelKVCacheProposer
 from specInfer.verifier import Verifier
 from specInfer.common import sychronize_time, InputAndCache
 from specInfer.logger import SpecLogger
@@ -76,19 +76,25 @@ class Generator:
         sample_steps = 0
         alpha = 0
 
-        prob_list = []
-        for t in range(proposed_output.generated_len):
+        prob_list = proposed_output.proposer_prob_list
+        #print(len(prob_list))
+        #print(prob_list)
+        #prob_list = []
+        #for t in range(proposed_output.generated_len):
             #print(verified_output.output_distribution.shape)
             #print(verified_output.output_distribution[t, :])
             #print(proposed_output.output_distribution[t, :])
-            max_elem = torch.max(proposed_output.output_distribution[t, :], dim=-1)
-            max_prob_index = max_elem.indices
+            
+            #max_elem = torch.max(proposed_output.output_distribution[t, :], dim=-1)
+            #max_prob_index = max_elem.indices
+            
             #print(f'sum: {proposed_output.output_distribution[t, :].sum(dim=-1)}')
             #print(max_prob_index)
             #print(proposed_output.output_distribution[t, max_prob_index])
-            max_prob = max_elem.values.item()
+            
+            #max_prob = max_elem.values.item()
             #print(max_prob)
-            prob_list.append(max_prob)
+            #prob_list.append(max_prob)
 
         for t in range(proposed_output.generated_len):
 
