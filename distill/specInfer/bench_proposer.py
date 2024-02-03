@@ -183,8 +183,8 @@ class SmallModelKVCacheProposer(Proposer):
             #print(next_token_id)
             #print(distribution.shape)
             # assume bsz = 1
-            next_token_prob = distribution[:, next_token_id].detach().item()
-            prob_list.append(next_token_prob)
+            #next_token_prob = distribution[:, next_token_id].detach().item()
+            #prob_list.append(next_token_prob)
 
             propose_logits.append(next_token_logits)
             propose_distributions.append(distribution)

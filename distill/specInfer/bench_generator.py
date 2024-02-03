@@ -76,7 +76,7 @@ class Generator:
         sample_steps = 0
         alpha = 0
 
-        prob_list = proposed_output.proposer_prob_list
+        #prob_list = proposed_output.proposer_prob_list
         #print(len(prob_list))
         #print(prob_list)
         #prob_list = []
@@ -169,6 +169,8 @@ class Generator:
         correct_tokens = None
         propose_steps = 0
         alpha, sample_steps = 0, 0
+
+        prob_list = []
         while True:
             start = sychronize_time()
             # propose n tokens, proposer always propose the token with highest probability
@@ -176,6 +178,13 @@ class Generator:
                 proposer_input,
                 self.max_propose_num,
                 sample_method)
+
+            confidence_distribution = confidence_sample_method(proposer_output.propose_logits[:, -1, :])
+
+            next_token_id = proposer_output.propose_tokens[i]
+            next_token_prob = confidence_distribution[:, next_token_id].detach().item()
+            prob_list.append(next_token_prob)
+
             propose_steps += 1
 
 
@@ -198,7 +207,7 @@ class Generator:
 
             # compare selected tokens
             # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
-            accept_token_ids, cur_alpha, cur_sample_steps, prob_list = self.sample_tokens(
+            accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
                 proposer_output, verifier_output)
             alpha += cur_alpha
             sample_steps += cur_sample_steps
