@@ -6,8 +6,9 @@ from specInfer.verifier import Verifier
 from specInfer.common import sychronize_time, InputAndCache
 from specInfer.logger import SpecLogger
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
 import copy
+import torch.nn.functional as F
 
 # logger = SpecLogger("output/generator.info")
 
@@ -22,6 +23,7 @@ class GeneratorOutput:
     alpha_sum: float
     wrong_token_ids: List[int]
     student_generated_ids: torch.tensor = None
+    prob_list: List[List[float]] = None
 
 
 class Generator:
@@ -68,13 +70,22 @@ class Generator:
 
     def sample_tokens(self,
                       proposed_output: OutputAndCache,
-                      verified_output: OutputAndCache) -> torch.Tensor:
+                      verified_output: OutputAndCache) -> Tuple[torch.Tensor, float, int, List[List[float]]]:
         # Accept-reject token loop
         accept_ids = []
         all_accepted = True
         sample_steps = 0
         alpha = 0
+        prob_list = []
 
+        assert  proposed_output.output_ids.shape[-1] == proposed_output.generated_len
+        for t in range(proposed_output.generated_len):
+            gen_id = proposed_output.output_ids[0, t].item()
+            prob = F.softmax(proposed_output.output_logits[t, :], dim=-1)
+            token_prob = prob[gen_id].item()
+            token_entropy = -torch.sum(prob * torch.log(prob), dim=-1).item()
+            prob_list.append([token_prob, token_entropy])
+            
         for t in range(proposed_output.generated_len):
             sampled_ratios = (
                 verified_output.output_distribution[t,
@@ -111,7 +122,7 @@ class Generator:
             accept_ids.append(next_token_id)
 
         accept_ids = torch.cat(accept_ids, dim=0)
-        return accept_ids.unsqueeze(0), alpha, sample_steps
+        return accept_ids.unsqueeze(0), alpha, sample_steps, prob_list
 
     @torch.inference_mode()
     def generate(self, input_ids, max_tokens, temperature=0.01, attention_mask=None, labels=None):
@@ -148,7 +159,7 @@ class Generator:
         alpha, sample_steps = 0, 0
         while True:
             start = sychronize_time()
-            # propose n tokens, proposer always propose the token with highest probability
+            # propose n tokens
             proposer_output = self.proposer.propose(
                 proposer_input,
                 self.max_propose_num,
@@ -175,7 +186,7 @@ class Generator:
 
             # compare selected tokens
             # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
-            accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
+            accept_token_ids, cur_alpha, cur_sample_steps, cur_prob_list = self.sample_tokens(
                 proposer_output, verifier_output)
             alpha += cur_alpha
             sample_steps += cur_sample_steps
@@ -235,7 +246,8 @@ class Generator:
                                sample_steps,
                                alpha,
                                wrong_token_ids,
-                               student_generated_tokens)
+                               student_generated_tokens,
+                               cur_prob_list)
 
     def print_time(self):
         if self.benchmark_time:
