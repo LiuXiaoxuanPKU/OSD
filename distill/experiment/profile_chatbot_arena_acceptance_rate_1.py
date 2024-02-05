@@ -118,7 +118,7 @@ def main(student_model_path,
 
             sd_records.append(record_i)
 
-            gen_len += len(output.generated_ids)
+            gen_len += 1
             iter_counter += 1
 
         result['gen_len'] = gen_len
@@ -154,7 +154,7 @@ if __name__ == "__main__":
                         default="models/vicuna-160m")
     parser.add_argument("--teacher", type=str,
                         help="teacher model path",
-                        default="models/vicuna-7b-v1.3")
+                        default="models/vicuna-7b-v1.5")
     parser.add_argument("--data", type=str,
                         help="data path",
                         default="data/raw_data/chatbot_arena_token_acceptance_rate_testing.json")

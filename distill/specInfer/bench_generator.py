@@ -134,7 +134,7 @@ class Generator:
             accept_ids.append(next_token_id)
 
         accept_ids = torch.cat(accept_ids, dim=0)
-        return accept_ids.unsqueeze(0), alpha, sample_steps, prob_list
+        return accept_ids.unsqueeze(0), alpha, sample_steps
 
     @torch.inference_mode()
     def generate(self, input_ids, max_tokens, temperature=0.01, attention_mask=None, labels=None):
@@ -144,6 +144,9 @@ class Generator:
 
         def sample_method(logits):
             return torch.softmax(logits / temperature, dim=-1)
+        
+        def confidence_sample_method(logits):
+            return torch.softmax(logits, dim=-1)
 
         generated_token_cnt = 0
         student_generated_token_cnt = 0
@@ -170,7 +173,7 @@ class Generator:
         propose_steps = 0
         alpha, sample_steps = 0, 0
 
-        prob_list = []
+        i = 0
         while True:
             start = sychronize_time()
             # propose n tokens, proposer always propose the token with highest probability
@@ -179,14 +182,15 @@ class Generator:
                 self.max_propose_num,
                 sample_method)
 
-            confidence_distribution = confidence_sample_method(proposer_output.propose_logits[:, -1, :])
+            prob_list = []
+            for j in range(proposer_output.generated_len):
+                next_token_id = proposer_output.output_ids[j]
+                confidence_distribution = confidence_sample_method(proposer_output.output_logits[j])
 
-            next_token_id = proposer_output.propose_tokens[i]
-            next_token_prob = confidence_distribution[:, next_token_id].detach().item()
-            prob_list.append(next_token_prob)
+                next_token_prob = confidence_distribution[next_token_id].detach().item()
+                prob_list.append(next_token_prob)
 
             propose_steps += 1
-
 
             if self.student_sampling:
                 student_proposer_output = self.proposer.propose(
@@ -251,6 +255,8 @@ class Generator:
             if self.benchmark_time:
                 self.generation_time.append(sychronize_time() - start)
 
+            i += 1
+            
             if generated_token_cnt >= max_tokens or self.tokenizer.eos_token_id in accept_token_ids:
                 break
             
