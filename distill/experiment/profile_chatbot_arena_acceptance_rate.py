@@ -74,8 +74,17 @@ def main(student_model_path,
             record_i = {}
             record_i['gen_idx'] = iter_counter
             record_i['accepted_len'] = output.correct_tokens.shape[-1]
-            record_i['confidences'] = [x[0] for x in output.prob_list]
-            record_i['entropies'] = [x[1] for x in output.prob_list]
+
+            record_i['confidences'], record_i['entropies'], record_i['first_appear'], record_i['appear_cnt'] = [], [], [], []
+            for conf_info in output.conf_infos:
+                record_i['confidences'].append(conf_info.token_prob)
+                record_i['entropies'].append(conf_info.token_entropy)
+                correct_token_ids = (conf_info.next_token_id == conf_info.layer_token_ids).squeeze(0)
+                if correct_token_ids.nonzero().numel() == 0:
+                    record_i['first_appear'].append(-1)
+                else:
+                    record_i['first_appear'].append(correct_token_ids.nonzero()[0].item())
+                record_i['appear_cnt'].append(sum(correct_token_ids).item())
             
             sd_records.append(record_i)
             iter_counter += 1
@@ -101,7 +110,7 @@ def main(student_model_path,
     # alpha / sample steps: average alpha per sample step (per propose)
     print(f'total data points: {i}, average correct tokens per propose step: {correctness / i}, average alpha per sample step: {alpha.item() / sample_steps}')
 
-    with open('acc_T0.json', 'w') as f_write:
+    with open('acc_T0_llama2.json', 'w') as f_write:
          json.dump(alpha_data, f_write, indent = 4)
 
 

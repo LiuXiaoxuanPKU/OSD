@@ -3,7 +3,15 @@ import time
 
 from dataclasses import dataclass
 import numpy as np
+from typing import Optional, List
 
+@dataclass
+class ConfInfo:
+    next_token_id: int
+    layer_probs: torch.Tensor
+    layer_token_ids: torch.Tensor
+    token_prob: float
+    token_entropy: float
 
 @dataclass
 class InputAndCache:
@@ -23,6 +31,7 @@ class OutputAndCache:
     output_logits: torch.Tensor
     output_distribution: torch.Tensor
     past_key_values: torch.Tensor
+    conf_infos: Optional[List[ConfInfo]] = None
 
 
 ########################### Sampling ########################

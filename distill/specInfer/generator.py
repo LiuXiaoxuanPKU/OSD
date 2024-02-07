@@ -1,12 +1,13 @@
 import torch
 from specInfer.common import (OutputAndCache,
+                              ConfInfo,
                               target_sample_from_distribution)
 from specInfer.proposer import SmallModelProposer, SmallModelKVCacheProposer
 from specInfer.verifier import Verifier
 from specInfer.common import sychronize_time, InputAndCache
 from specInfer.logger import SpecLogger
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import copy
 import torch.nn.functional as F
 
@@ -23,7 +24,7 @@ class GeneratorOutput:
     alpha_sum: float
     wrong_token_ids: List[int]
     student_generated_ids: torch.tensor = None
-    prob_list: List[List[float]] = None
+    conf_infos: Optional[List[ConfInfo]] = None
 
 
 class Generator:
@@ -76,15 +77,6 @@ class Generator:
         all_accepted = True
         sample_steps = 0
         alpha = 0
-        prob_list = []
-
-        assert  proposed_output.output_ids.shape[-1] == proposed_output.generated_len
-        for t in range(proposed_output.generated_len):
-            gen_id = proposed_output.output_ids[0, t].item()
-            prob = F.softmax(proposed_output.output_logits[t, :], dim=-1)
-            token_prob = prob[gen_id].item()
-            token_entropy = -torch.sum(prob * torch.log(prob), dim=-1).item()
-            prob_list.append([token_prob, token_entropy])
             
         for t in range(proposed_output.generated_len):
             sampled_ratios = (
@@ -122,7 +114,7 @@ class Generator:
             accept_ids.append(next_token_id)
 
         accept_ids = torch.cat(accept_ids, dim=0)
-        return accept_ids.unsqueeze(0), alpha, sample_steps, prob_list
+        return accept_ids.unsqueeze(0), alpha, sample_steps
 
     @torch.inference_mode()
     def generate(self, input_ids, max_tokens, temperature=0.01, attention_mask=None, labels=None):
@@ -186,7 +178,7 @@ class Generator:
 
             # compare selected tokens
             # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
-            accept_token_ids, cur_alpha, cur_sample_steps, cur_prob_list = self.sample_tokens(
+            accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
                 proposer_output, verifier_output)
             alpha += cur_alpha
             sample_steps += cur_sample_steps
@@ -239,6 +231,7 @@ class Generator:
         self.proposer.print_time()
         self.verifier.print_time()
         self.print_time()
+        assert propose_steps == 1, f"{propose_steps} > 1!!"
         return GeneratorOutput(self.tokenizer.batch_decode(generated_tokens),
                                generated_tokens,
                                correct_tokens,
@@ -247,7 +240,7 @@ class Generator:
                                alpha,
                                wrong_token_ids,
                                student_generated_tokens,
-                               cur_prob_list)
+                               proposer_output.conf_infos)
 
     def print_time(self):
         if self.benchmark_time:

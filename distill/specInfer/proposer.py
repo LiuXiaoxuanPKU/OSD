@@ -2,12 +2,13 @@ import torch
 from typing import List
 from specInfer.common import (InputAndCache,
                               OutputAndCache,
+                              ConfInfo,
                               crop_past_key_values,
                               crop_mqa_past_key_values,
                               crop_past_key_values_seq2seq,
                               sychronize_time)
 import numpy as np
-
+import torch.nn.functional as F
 
 class Proposer:
     def __init__(self, benchmark_time=False) -> None:
@@ -157,6 +158,7 @@ class SmallModelKVCacheProposer(Proposer):
         propose_tokens = []
         propose_logits = []
         propose_distributions = []
+        propose_conf_infos = []
         input_ids = input.input_ids
         decoder_input_ids = input.decoder_input_ids
         past_key_values = input.past_key_values
@@ -171,6 +173,7 @@ class SmallModelKVCacheProposer(Proposer):
             else:
                 outputs = self.model(input_ids,
                                      past_key_values=past_key_values,
+                                     output_hidden_states=True,
                                      use_cache=True)
             past_key_values = outputs.past_key_values
             # next_token_logits has shape [1, vocab_size]
@@ -181,6 +184,24 @@ class SmallModelKVCacheProposer(Proposer):
             propose_logits.append(next_token_logits)
             propose_distributions.append(distribution)
             propose_tokens.append(next_token_id)
+
+            ################################# Start calculating confidence related features #####################
+            hidden_states = outputs.hidden_states
+            last_token_states = []
+            for h in hidden_states:
+                last_token_states.append(h[:, -1, :])
+            last_token_states = torch.cat(last_token_states, dim=0)
+            all_layer_logits = self.model.lm_head(last_token_states)
+            layer_probs = F.softmax(all_layer_logits, dim=-1)
+            token_layer_probs = layer_probs[:, next_token_id].reshape(1, -1)
+            # FIXME: The following only works for argmax sampling
+            layer_token_ids = all_layer_logits.argmax(dim=-1)
+
+            token_prob = token_layer_probs[0, -1].item()
+            token_entropy = -torch.sum(layer_probs[-1, :] * torch.log(layer_probs[-1, :]), dim=-1).item()
+            conf_info = ConfInfo(next_token_id, token_layer_probs, layer_token_ids, token_prob, token_entropy)
+            propose_conf_infos.append(conf_info)
+            ######################################################################################################
 
             if next_token_id.item() == self.tokenizer.eos_token_id:
                 generated_len = i + 1
@@ -195,7 +216,7 @@ class SmallModelKVCacheProposer(Proposer):
         propose_distributions = torch.cat(propose_distributions, dim=0)
         return OutputAndCache(generated_len, propose_tokens,
                               propose_logits, propose_distributions,
-                              past_key_values)
+                              past_key_values, propose_conf_infos)
 
     def adjust_input_impl(self, accept_token_ids: torch.Tensor,
                           proposer_input: InputAndCache,
