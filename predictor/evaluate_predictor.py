@@ -27,7 +27,7 @@ import torch
 from torch.utils.data import Dataset
 import transformers
 from transformers.trainer_pt_utils import LabelSmoother
-from transformers import Trainer, TrainerCallback, BitsAndBytesConfig, PretrainedConfig
+from transformers import Trainer, BitsAndBytesConfig, PretrainedConfig
 
 from fastchat.model.model_adapter import get_conversation_template
 
@@ -247,168 +247,6 @@ class PredictorTrainer(Trainer):
         self.log(log)
         return (loss, new_predictor_values) if return_outputs else loss
 
-    @torch.inference_mode()
-    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        if hasattr(model, "module"):
-            # ddp
-            predictor = model.module.predictor
-        else:
-            predictor = model.predictor
-
-        teacher_model = self.model.teacher_model
-
-        print('new prediction step!')
-
-        find = False
-        for callback in self.callback_handler.callbacks:
-            if isinstance(callback, PredictorTrainerCallback):
-                find = True
-
-                input_ids = inputs["input_ids"]
-                attention_mask = inputs["attention_mask"]
-                prompt_lens = [torch.sum(attention_mask[i]).item() for i in range(input_ids.shape[0])]
-                all_eos_flag = [False for _ in range(input_ids.shape[0])]
-                
-                critical_dim, critical_len = max(enumerate(prompt_lens), key=itemgetter(1))
-
-                # Shift so that tokens < n predict n
-                loss = 0
-                loss_fct = CrossEntropyLoss()
-                log = {}
-
-                correct_count = 0
-                all_pred_count = 0
-                    
-                iter_counter = 0
-                while not all(all_eos_flag) and critical_len + iter_counter < self.args.model_max_length:
-                    #print(self.tokenizer.decode(input_ids[0]))
-                    outputs = model(
-                        input_ids=input_ids, attention_mask=attention_mask
-                    )
-                    predictor_values, generated_seq = outputs[0][0], outputs[1]
-                    new_tokens = generated_seq[:, -1]
-
-                    with torch.inference_mode():
-                        teacher_outputs = teacher_model(
-                            input_ids=input_ids, attention_mask=attention_mask
-                        )
-
-                    predictor_results = []
-                    for b in range(input_ids.shape[0]):
-                        predicted_label = torch.argmax(predictor_values[b, ...])
-                        predictor_results.append(predicted_label)
-
-                    teacher_next_token_logits = teacher_outputs.logits[:, -1, :]
-                    teacher_new_tokens = []
-                    for i in range(teacher_next_token_logits.shape[0]):
-                        teacher_new_token = torch.argmax(torch.softmax(teacher_next_token_logits[i, :] / 0.001, dim=-1), dim=-1)
-                        teacher_new_tokens.append(teacher_new_token)
-
-                    # inspect whether the teacher output contains eos
-                    # update the flag accordingly
-                    for b in range(input_ids.shape[0]):
-                        if all_eos_flag[b] == True:
-                            continue
-
-                        new_token = new_tokens[b]
-                        if new_token == self.tokenizer.eos_token_id:
-                            print(f'Seq: {b} hits eos. Evaluation continuing as other seqs are still running.')
-                            all_eos_flag[b] = True
-
-                    
-                    # create binary classification labels 
-                    labels = []
-                    for b in range(input_ids.shape[0]):
-                        student_token = new_tokens[b]
-                        teacher_token = teacher_new_tokens[b]
-                        if student_token == teacher_token:
-                            # True for the binary classifier
-                            labels.append([0,1])
-                        else:
-                            # False
-                            labels.append([1,0])
-                    
-                    # (bsz, num predictor heads, predictor value size)
-                    # TODO: support the multi-predictor head scenario
-                    predictor_labels = torch.Tensor(labels).to(predictor_values.device, dtype=float)
-                    #print(predictor_labels)
-
-                    new_predictor_labels = []
-                    #print(predictor_labels.shape)
-                    for i in range(predictor):           
-                        #print(predictor_values.shape)
-                        #print(predictor_labels.shape)
-
-                        # iterate over batch size dim, if no eos, compute loss
-                        loss_i = 0
-                        for b in range(input_ids.shape[0]):
-                            if not all_eos_flag[b]:
-                                #print(f'adding loss of seq: {b}')
-                                seq_loss_i = loss_fct(predictor_values[b, ...], predictor_labels[b, ...])
-                                loss_i += seq_loss_i
-
-                                gt =  predictor_labels[b, ...]
-                                
-                                if gt == [1,0]:
-                                    gt_label = 0
-                                else:
-                                    gt_label = 1
-                                
-                                #print(gt)
-                                #print(predictor_results[b])
-                                #print(gt_label == predictor_results[b])
-                                if predictor_results[b] == gt_label:
-                                    correct_count += 1
-
-                                all_pred_count += 1
-
-                        loss += loss_i
-                        not_ignore = predictor_labels.ne(IGNORE_TOKEN_ID)
-                        predictor_labels = predictor_labels[not_ignore]
-                        new_predictor_labels.append(predictor_labels)
-                    
-                    # expand input_ids by a length of 1 along dim -1
-                    zeros = torch.zeros(input_ids.shape[0], 1).to(input_ids.device, dtype=int)
-                    input_ids = torch.cat((input_ids, zeros), dim=1)
-
-                    # add new token to left-padded sequence
-                    for b in range(input_ids.shape[0]):
-                        input_ids[b, -1] = teacher_new_tokens[b]
-                    
-                    attention_mask = generated_seq.ne(self.tokenizer.pad_token_id)
-
-                    iter_counter += 1
-
-                print('iteration counter:')
-                print(iter_counter)
-
-                print(f'accuracy: {correct_count / all_pred_count}')
-
-                callback.iter_counter = iter_counter
-                callback.correct_count = correct_count
-                callback.all_pred_count = all_pred_count
-
-        assert find
-
-        return None, None, None
-
-class PredictorTrainerCallback(TrainerCallback):
-    def __init__(self) -> None:
-        super().__init__()
-        self.all_pred_count = 0
-        self.correct_count = 0
-        self.iter_counter = 0
-    
-    def on_predict(self, args, state, control, **kwargs):
-        if args.local_rank == 0:    
-            print(f"iteration counter: {self.iter_counter}")
-            print(f"accuracy: {self.correct_count / self.all_pred_count}")
-        
-            wandb.log({"predictor accuracy": self.correct_count / self.all_pred_count})
-
-        self.all_pred_count = 0
-        self.correct_count = 0
-        self.iter_counter = 0
 
 local_rank = None
 
@@ -687,17 +525,11 @@ def train():
     trainer = PredictorTrainer(
         model=predictor_lm_head, tokenizer=tokenizer, args=training_args, **data_module
     )
-    trainer.add_callback(PredictorTrainerCallback)
 
-    if training_args.do_train:
-        if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
-            trainer.train(resume_from_checkpoint=True)
-        else:
-            trainer.train()
-
-    if training_args.do_eval:
-        trainer.evaluate()
-
+    if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
+        trainer.train(resume_from_checkpoint=True)
+    else:
+        trainer.train()
     model.config.use_cache = True
     # trainer.save_state()
     
