@@ -31,7 +31,7 @@ from transformers import Trainer, TrainerCallback, BitsAndBytesConfig, Pretraine
 
 from fastchat.model.model_adapter import get_conversation_template
 
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, BCELoss
 from torch.nn import functional as F
 
 from student_predictor_osd import PredictorModel, PredictorOSDConfig
@@ -157,13 +157,19 @@ class PredictorTrainer(Trainer):
         
         critical_dim, critical_len = max(enumerate(prompt_lens), key=itemgetter(1))
 
+        model_max_length = self.args.model_max_length
+        if critical_len >= model_max_length:
+            # scaling up to avoid stall
+            # TODO: make this configurable
+            model_max_length * 2
+
         # Shift so that tokens < n predict n
         loss = 0
-        loss_fct = CrossEntropyLoss()
+        loss_fct = BCELoss()
         log = {}
             
         iter_counter = 0
-        while not all(all_eos_flag) and critical_len + iter_counter < self.args.model_max_length:
+        while not all(all_eos_flag) and critical_len + iter_counter < model_max_length:
             #print(self.tokenizer.decode(input_ids[0]))
             outputs = model(
                 input_ids=input_ids, attention_mask=attention_mask
@@ -201,13 +207,14 @@ class PredictorTrainer(Trainer):
                 teacher_token = teacher_new_tokens[b]
                 if student_token == teacher_token:
                     # True for the binary classifier
-                    labels.append([0,1])
+                    labels.append([1])
                 else:
                     # False
-                    labels.append([1,0])
+                    labels.append([0])
             
             # (bsz, num predictor heads, predictor value size)
             # TODO: support the multi-predictor head scenario
+            predictor_values = predictor_values.to(dtype=float)
             predictor_labels = torch.Tensor(labels).to(predictor_values.device, dtype=float)
             #print(predictor_labels)
 
@@ -222,6 +229,8 @@ class PredictorTrainer(Trainer):
                 for b in range(input_ids.shape[0]):
                     if not all_eos_flag[b]:
                         #print(f'adding loss of seq: {b}')
+                        #print(predictor_values[b, ...])
+                        #print(predictor_labels[b, ...])
                         seq_loss_i = loss_fct(predictor_values[b, ...], predictor_labels[b, ...])
                         loss_i += seq_loss_i
                 loss += loss_i
@@ -243,6 +252,7 @@ class PredictorTrainer(Trainer):
 
         print('iteration counter:')
         print(iter_counter)
+        print(loss)
 
         self.log(log)
         return (loss, new_predictor_values) if return_outputs else loss
@@ -295,7 +305,7 @@ class PredictorTrainer(Trainer):
 
                     predictor_results = []
                     for b in range(input_ids.shape[0]):
-                        predicted_label = torch.argmax(predictor_values[b, ...])
+                        predicted_label = predictor_values[b, ...]
                         predictor_results.append(predicted_label)
 
                     teacher_next_token_logits = teacher_outputs.logits[:, -1, :]
@@ -323,10 +333,10 @@ class PredictorTrainer(Trainer):
                         teacher_token = teacher_new_tokens[b]
                         if student_token == teacher_token:
                             # True for the binary classifier
-                            labels.append([0,1])
+                            labels.append(1)
                         else:
                             # False
-                            labels.append([1,0])
+                            labels.append(0)
                     
                     # (bsz, num predictor heads, predictor value size)
                     # TODO: support the multi-predictor head scenario
@@ -347,9 +357,9 @@ class PredictorTrainer(Trainer):
                                 seq_loss_i = loss_fct(predictor_values[b, ...], predictor_labels[b, ...])
                                 loss_i += seq_loss_i
 
-                                gt =  predictor_labels[b, ...]
+                                gt =  int(predictor_labels[b, 0].item())
                                 
-                                if gt == [1,0]:
+                                if gt == 0:
                                     gt_label = 0
                                 else:
                                     gt_label = 1
@@ -388,6 +398,11 @@ class PredictorTrainer(Trainer):
                 callback.correct_count = correct_count
                 callback.all_pred_count = all_pred_count
 
+                callback.accumulative_steps += 1
+                callback.accumulative_accuracy += correct_count / all_pred_count
+
+                print(f'accumulative accuracy: {callback.accumulative_accuracy / callback.accumulative_steps}')
+
         assert find
 
         return None, None, None
@@ -395,6 +410,10 @@ class PredictorTrainer(Trainer):
 class PredictorTrainerCallback(TrainerCallback):
     def __init__(self) -> None:
         super().__init__()
+
+        self.accumulative_steps = 0
+        self.accumulative_accuracy = 0
+        
         self.all_pred_count = 0
         self.correct_count = 0
         self.iter_counter = 0
@@ -470,9 +489,9 @@ def preprocess(
 
             for label in labels[:predictor_num_heads]:
                 if label == 0:
-                    all_predictor_labels += [int(1),int(0)]
+                    all_predictor_labels += [0]
                 else:
-                    all_predictor_labels += [int(0),int(1)]
+                    all_predictor_labels += [1]
     
     # hard-coded padding length to 8192: (8192/num_heads) max records (8192 max records when num_heads=1)
     # TODO: make this configurable
@@ -651,13 +670,20 @@ def train():
         p.requires_grad = False
 
     # Add Predictor heads
-    predictor_lm_head = PredictorModel(
-        model,
-        teacher_model,
-        predictor_num_heads=training_args.predictor_num_heads,
-        predictor_num_layers=training_args.predictor_num_layers,
-        base_model_name_or_path=model_args.model_name_or_path,
-    )
+    if model_args.predictor_head_name_or_path is not None:
+        predictor_lm_head = PredictorModel.from_pretrained(
+            model_args.predictor_head_name_or_path,
+            base_model=model_args.model_name_or_path,
+            teacher_model=teacher_model,
+        )
+    else:
+        predictor_lm_head = PredictorModel(
+            model,
+            teacher_model,
+            predictor_num_heads=training_args.predictor_num_heads,
+            predictor_num_layers=training_args.predictor_num_layers,
+            base_model_name_or_path=model_args.model_name_or_path,
+        )
 
     # Format output dir
     training_args.output_dir = f"{training_args.output_dir}_predictor_mlp_{model_args.model_name_or_path.split('/')[-1]}_predictor_{training_args.predictor_num_heads}_lr_{training_args.learning_rate}_layers_{training_args.predictor_num_layers}"

@@ -43,7 +43,7 @@ def main(student_model_path,
     for d in eval_dataset:
         max_tokens = 128
         input_ids = d["input_ids"].reshape(1, -1).cuda()
-        output = generator.generate(input_ids, max_tokens, temperature=0.01)
+        output = generator.generate(input_ids, max_tokens, temperature=0.001)
         correct_tokens = output.correct_tokens.squeeze(0)
         stats[correct_tokens] = stats[correct_tokens] + 1
         if i % 10 == 0:
@@ -101,13 +101,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--student", type=str,
                         help="student model path",
-                        default="/data/fullvicuna160M_vicuna7B_spider_teacherkl_argmax/checkpoint-500")
+                        default="/home/hedgehog/workspace/models/vicuna-160m")
     parser.add_argument("--teacher", type=str,
                         help="teacher model path",
-                        default="/data/vicuna-7b-v1.3/")
+                        default="/home/hedgehog/workspace/models/vicuna-160m")
     parser.add_argument("--data", type=str,
                         help="data path",
-                        default="/home/lily/specNBCE/data/spider_eval.json")
+                        default="/home/hedgehog/workspace/OSD/data/raw_data/spider_validation.json")
     parser.add_argument("--max_propose_num", type=int,
                         help="number of proposed tokens",
                         default=5)

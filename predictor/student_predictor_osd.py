@@ -135,7 +135,8 @@ class PredictorModel(nn.Module):
             [
                 nn.Sequential(
                     *([ResBlock(self.hidden_size)] * predictor_num_layers),
-                    nn.Linear(self.hidden_size, 2, bias=True),
+                    nn.Linear(self.hidden_size, 1, bias=True),
+                    nn.Sigmoid()
                 )
                 for _ in range(predictor_num_heads)
             ]
@@ -145,8 +146,9 @@ class PredictorModel(nn.Module):
         self.predictor_head.to(self.base_model.dtype).to(self.base_model.device)
 
         for i in range(predictor_num_heads):
-            # Random initialization
-            torch.nn.init.uniform_(self.predictor_head[i][-1].weight.data[:])
+            # Random initialization of the linear layers
+            torch.nn.init.uniform_(self.predictor_head[i][:-1][0].linear.weight.data[:])
+            torch.nn.init.uniform_(self.predictor_head[i][:-1][1].weight.data[:])
 
     def get_tokenizer(self):
         """Get the tokenizer of the base model.
@@ -161,6 +163,7 @@ class PredictorModel(nn.Module):
         cls,
         predictor_head_name_or_path,
         base_model=None,
+        teacher_model=None,
         predictor_num_heads=None,
         **kwargs,
     ):
@@ -186,9 +189,10 @@ class PredictorModel(nn.Module):
 
         model = cls(
             base_model,
+            teacher_model,
             predictor_config.predictor_num_heads,
             predictor_config.predictor_num_layers,
-            predcitor_config.base_model_name_or_path,
+            predictor_config.base_model_name_or_path,
         )
         predictor_head_path = os.path.join(predictor_head_name_or_path, "predictor_lm_head.pt")
         if os.path.exists(predictor_head_path):

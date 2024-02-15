@@ -8,16 +8,19 @@ torchrun --nproc_per_node=1 predictor/train_predictor.py \
     --teacher_model_name_or_path /home/hedgehog/workspace/models/vicuna-7b-v1.5 \
     --load_in_4bit True \
     --data_path /home/hedgehog/workspace/OSD/data/vicuna160m_chatbot_arena_all_token_acceptance_rate_for_training_temp_0p001_1k1.json \
+    --eval_data_path /home/hedgehog/workspace/OSD/data/vicuna160m_chatbot_arena_all_token_acceptance_rate_prepare_for_training_eval_500_1.json \
     --bf16 True \
     --output_dir ${datapath}/vicuna160m_layer1_predictor_trial_${trial} \
+    --do_train True \
+    --do_eval True \
     --num_train_epochs 1 \
     --per_device_train_batch_size 6 \
     --per_device_eval_batch_size 6 \
     --gradient_accumulation_steps 4 \
-    --evaluation_strategy "no" \
+    --evaluation_strategy "epoch" \
     --save_strategy "steps" \
-    --save_steps 400 \
-    --save_total_limit 2 \
+    --save_steps 20 \
+    --save_total_limit 1 \
     --learning_rate 1e-3 \
     --weight_decay 0.0 \
     --warmup_ratio 0.1 \

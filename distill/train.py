@@ -397,6 +397,7 @@ def train():
             model_args.teacher_model_path,
             config=teacher_config
         )
+    
     teacher_model.cuda()
     print(
         f"Teacher Model memory: {teacher_model.get_memory_footprint() / 1024 / 1024} MB")
