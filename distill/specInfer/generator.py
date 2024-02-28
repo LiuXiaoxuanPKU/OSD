@@ -77,6 +77,17 @@ class Generator:
         all_accepted = True
         sample_steps = 0
         alpha = 0
+
+        for t in range(proposed_output.generated_len):
+            ######################### Adjust Confidence Related Info #############################
+            draft_prob_dis = torch.nn.functional.softmax(proposed_output.output_logits[t])
+            target_prob_dis = torch.nn.functional.softmax(verified_output.output_logits[t])
+            proposed_output.conf_infos[t].target_prob = target_prob_dis[proposed_output.output_ids[0, t]].item()
+            proposed_output.conf_infos[t].target_max_prob = target_prob_dis.max().item()
+            proposed_output.conf_infos[t].target_entropy = -torch.sum(target_prob_dis * torch.log(target_prob_dis), dim=-1).item()
+            kl_loss = torch.nn.KLDivLoss(log_target=True)
+            proposed_output.conf_infos[t].kl_div = kl_loss(torch.log(draft_prob_dis), torch.log(target_prob_dis)).item()
+            ######################################################################################
             
         for t in range(proposed_output.generated_len):
             sampled_ratios = (

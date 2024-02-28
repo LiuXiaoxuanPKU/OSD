@@ -13,6 +13,11 @@ class ConfInfo:
     token_prob: float
     token_entropy: float
 
+    target_prob: float
+    target_max_prob: float
+    target_entropy: float
+    kl_div: float
+
 @dataclass
 class InputAndCache:
     input_ids: torch.Tensor

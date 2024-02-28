@@ -199,7 +199,9 @@ class SmallModelKVCacheProposer(Proposer):
 
             token_prob = token_layer_probs[0, -1].item()
             token_entropy = -torch.sum(layer_probs[-1, :] * torch.log(layer_probs[-1, :]), dim=-1).item()
-            conf_info = ConfInfo(next_token_id, token_layer_probs, layer_token_ids, token_prob, token_entropy)
+            conf_info = ConfInfo(next_token_id, token_layer_probs,
+                                 layer_token_ids, token_prob, token_entropy,
+                                 None, None, None, None)
             propose_conf_infos.append(conf_info)
             ######################################################################################################
 

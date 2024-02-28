@@ -74,8 +74,13 @@ def main(student_model_path,
             record_i = {}
             record_i['gen_idx'] = iter_counter
             record_i['accepted_len'] = output.correct_tokens.shape[-1]
+            if record_i['accepted_len'] == 10:
+                print(output.correct_tokens)
+                print(tokenizer.batch_decode(output.correct_tokens)[0])
+                print(result['prompt'])
 
             record_i['confidences'], record_i['entropies'], record_i['first_appear'], record_i['appear_cnt'] = [], [], [], []
+            record_i['target_prob'], record_i['target_max_prob'], record_i['target_entropy'], record_i['kl'] = [], [], [], []
             for conf_info in output.conf_infos:
                 record_i['confidences'].append(conf_info.token_prob)
                 record_i['entropies'].append(conf_info.token_entropy)
@@ -85,6 +90,10 @@ def main(student_model_path,
                 else:
                     record_i['first_appear'].append(correct_token_ids.nonzero()[0].item())
                 record_i['appear_cnt'].append(sum(correct_token_ids).item())
+                record_i['target_prob'].append(conf_info.target_prob)
+                record_i['target_max_prob'].append(conf_info.target_max_prob)
+                record_i['target_entropy'].append(conf_info.token_entropy)
+                record_i['kl'].append(conf_info.kl_div)
             
             sd_records.append(record_i)
             iter_counter += 1
@@ -95,7 +104,7 @@ def main(student_model_path,
         result['avg_correct_count'] = correct_count_i / propose_steps_i
         result['avg_alpha'] = alpha_i.item()/sample_steps_i
         alpha_data.append(result)
-        print(result)
+        # print(result)
         print(gen_len, len(sd_records))
 
         correctness += correct_count_i / propose_steps_i
@@ -110,7 +119,7 @@ def main(student_model_path,
     # alpha / sample steps: average alpha per sample step (per propose)
     print(f'total data points: {i}, average correct tokens per propose step: {correctness / i}, average alpha per sample step: {alpha.item() / sample_steps}')
 
-    with open('acc_T0_llama2.json', 'w') as f_write:
+    with open('acc_T0_llama2_with_target.json', 'w') as f_write:
          json.dump(alpha_data, f_write, indent = 4)
 
 
