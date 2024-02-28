@@ -13,21 +13,25 @@ from specInfer.generator import Generator
 from train import LazySupervisedDataset
 
 from tqdm import tqdm
-def load_model(model_path):
+def load_model(model_path, device):
     config = AutoConfig.from_pretrained(model_path)
     model = AutoModelForCausalLM.from_pretrained(
-        model_path, config=config, device_map="cuda", torch_dtype=torch.bfloat16)
+        model_path, config=config, device_map=device, torch_dtype=torch.bfloat16)
     return model
 
+def get_model_name(model_path):
+    return model_path.split('/')[-1]
 
 def main(student_model_path,
          teacher_model_path,
          max_propose_num,
-         data_path):
+         data_path,
+         total_request_num,
+         max_new_tokens):
     tokenizer = AutoTokenizer.from_pretrained(teacher_model_path)
     tokenizer.pad_token = tokenizer.unk_token
-    teacher_model = load_model(teacher_model_path)
-    student_model = load_model(student_model_path)
+    teacher_model = load_model(teacher_model_path, 'auto')
+    student_model = load_model(student_model_path, 'cuda:7')
 
     generator = Generator(student_model, teacher_model,
                           tokenizer, max_propose_num, False)
@@ -40,7 +44,7 @@ def main(student_model_path,
 
     i = 0
     correctness = 0
-    for s in tqdm(range(len(eval_dataset)//30)):
+    for s in tqdm(range(len(eval_dataset))):
         d = eval_dataset[s]
 
         alpha, sample_steps =0, 0
@@ -98,6 +102,9 @@ def main(student_model_path,
             sd_records.append(record_i)
             iter_counter += 1
 
+            if gen_len >= max_new_tokens:
+                break
+
         result['gen_len'] = gen_len
         result['sd_records'] = sd_records
 
@@ -112,6 +119,8 @@ def main(student_model_path,
         sample_steps += sample_steps_i
 
         i += 1
+        if i >= total_request_num:
+            break
 
     # propose step: each step proposes a n-gram
     # sample step: single generation by student
@@ -119,7 +128,8 @@ def main(student_model_path,
     # alpha / sample steps: average alpha per sample step (per propose)
     print(f'total data points: {i}, average correct tokens per propose step: {correctness / i}, average alpha per sample step: {alpha.item() / sample_steps}')
 
-    with open('acc_T0_llama2_with_target.json', 'w') as f_write:
+
+    with open(f"{get_model_name(student_model_path)}_{get_model_name(teacher_model_path)}.json", 'w') as f_write:
          json.dump(alpha_data, f_write, indent = 4)
 
 
@@ -127,16 +137,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--student", type=str,
                         help="student model path",
-                        default="models/vicuna-160m")
+                        default="eqhylxx/vicuna-160m")
     parser.add_argument("--teacher", type=str,
                         help="teacher model path",
-                        default="models/vicuna-7b-v1.3")
+                        default="eqhylxx/vicuna-160m")
     parser.add_argument("--data", type=str,
                         help="data path",
-                        default="data/raw_data/chatbot_arena_token_acceptance_rate_testing.json")
+                        default="/mnt/share/datasets/arena_train.json")
     parser.add_argument("--max_propose_num", type=int,
                         help="number of proposed tokens",
                         default=10)
-
+    parser.add_argument("--num_requests", type=int, help="total number of requests to run", default=1000)
+    parser.add_argument("--max_new_tokens", type=int, help="Maximum number of new tokens", default=512 )
+    
     args = parser.parse_args()
-    main(args.student, args.teacher, args.max_propose_num, args.data)
+    main(args.student, args.teacher, args.max_propose_num, args.data, args.num_requests, args.max_new_tokens)
