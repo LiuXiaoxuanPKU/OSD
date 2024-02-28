@@ -26,11 +26,12 @@ def main(student_model_path,
          teacher_model_path,
          max_propose_num,
          data_path,
-         total_request_num):
+         total_request_num,
+         max_new_tokens):
     tokenizer = AutoTokenizer.from_pretrained(teacher_model_path)
     tokenizer.pad_token = tokenizer.unk_token
     teacher_model = load_model(teacher_model_path, 'auto')
-    student_model = load_model(student_model_path, 'cuda:0')
+    student_model = load_model(student_model_path, 'cuda:7')
 
     generator = Generator(student_model, teacher_model,
                           tokenizer, max_propose_num, False)
@@ -92,6 +93,9 @@ def main(student_model_path,
             sd_records.append(record_i)
             iter_counter += 1
 
+            if gen_len >= max_new_tokens:
+                break
+
         result['gen_len'] = gen_len
         result['sd_records'] = sd_records
 
@@ -135,6 +139,7 @@ if __name__ == "__main__":
                         help="number of proposed tokens",
                         default=10)
     parser.add_argument("--num_requests", type=int, help="total number of requests to run", default=1000)
-
+    parser.add_argument("--max_new_tokens", type=int, help="Maximum number of new tokens", default=512 )
+    
     args = parser.parse_args()
-    main(args.student, args.teacher, args.max_propose_num, args.data, args.num_requests)
+    main(args.student, args.teacher, args.max_propose_num, args.data, args.num_requests, args.max_new_tokens)
