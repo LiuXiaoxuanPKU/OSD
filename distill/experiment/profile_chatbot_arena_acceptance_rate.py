@@ -31,7 +31,7 @@ def main(student_model_path,
     tokenizer = AutoTokenizer.from_pretrained(teacher_model_path)
     tokenizer.pad_token = tokenizer.unk_token
     teacher_model = load_model(teacher_model_path, 'auto')
-    student_model = load_model(student_model_path, 'cuda:7')
+    student_model = load_model(student_model_path, 'cuda')
 
     generator = Generator(student_model, teacher_model,
                           tokenizer, max_propose_num, False)
@@ -78,10 +78,10 @@ def main(student_model_path,
             record_i = {}
             record_i['gen_idx'] = iter_counter
             record_i['accepted_len'] = output.correct_tokens.shape[-1]
-            if record_i['accepted_len'] == 10:
-                print(output.correct_tokens)
-                print(tokenizer.batch_decode(output.correct_tokens)[0])
-                print(result['prompt'])
+            # if record_i['accepted_len'] == 10:
+            #     print(output.correct_tokens)
+            #     print(tokenizer.batch_decode(output.correct_tokens)[0])
+            #     print(result['prompt'])
 
             record_i['confidences'], record_i['entropies'], record_i['first_appear'], record_i['appear_cnt'] = [], [], [], []
             record_i['target_prob'], record_i['target_max_prob'], record_i['target_entropy'], record_i['kl'] = [], [], [], []
