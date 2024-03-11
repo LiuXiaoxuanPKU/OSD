@@ -12,6 +12,9 @@ from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
 from specInfer.generator import Generator
 from train import LazySupervisedDataset
 
+from fastchat.model.model_adapter import get_conversation_template
+import sqlite3
+
 from tqdm import tqdm
 def load_model(model_path, device):
     config = AutoConfig.from_pretrained(model_path)
@@ -31,14 +34,13 @@ def main(student_model_path,
     tokenizer = AutoTokenizer.from_pretrained(teacher_model_path)
     tokenizer.pad_token = tokenizer.unk_token
     teacher_model = load_model(teacher_model_path, 'auto')
-    student_model = load_model(student_model_path, 'cuda')
+    student_model = load_model(student_model_path, 'cuda:0')
 
     generator = Generator(student_model, teacher_model,
                           tokenizer, max_propose_num, False)
-
-    eval_json = json.load(open(data_path, "r"))
-    eval_dataset = LazySupervisedDataset(eval_json, tokenizer=tokenizer,
-                                         model=teacher_model_path, do_eval=True)
+    
+    with open(data_path) as f:
+        eval_dataset = json.load(f)
 
     alpha_data = []
 
@@ -50,7 +52,42 @@ def main(student_model_path,
         alpha, sample_steps =0, 0
         alpha_i, sample_steps_i = 0, 0
         propose_steps_i, correct_count_i = 0, 0
-        prompt_ids = d["input_ids"].reshape(1, -1).cuda()    
+
+        db_name = d["db_id"]
+        db_path = f"../spider_eval/database/spider/test_database/{db_name}/{db_name}.sqlite"
+        con = sqlite3.connect(db_path)
+        cursor = con.cursor()
+        cursor.execute('SELECT name FROM sqlite_master WHERE type="table";')
+        curr_table = cursor.fetchall()
+
+        table_rows = {}
+        for table in curr_table:
+            table_name = str(table[0])
+            
+            cursor_t = con.execute(f"SELECT * from {table_name}")
+            names = list(map(lambda x: x[0], cursor_t.description))
+            table_rows[table_name] = names
+            cursor_t.close()
+
+        cursor.close()
+        con.close()
+        
+        database_info = "The SQL database has "
+        for k, v in table_rows.items():
+            database_info = database_info + f"table named {k} with columns {v}, "
+
+        prefix= "Could you translate the following question into SQL. Please only generate SQL, don't include explanation in the answer. "
+        prompt = prefix + database_info + "Question: "  + d["question"]
+        
+        #conv = get_conversation_template(teacher_model_path)
+        #conv.append_message(conv.roles[0], prompt)
+        #conv.append_message(conv.roles[1], "")
+        #prompt_with_template = conv.get_prompt()
+        prompt_with_template = prompt
+        max_new_tokens = 512
+        inputs = tokenizer([prompt_with_template], return_tensors="pt").to(teacher_model.device)
+
+        prompt_ids = inputs.input_ids.reshape(1, -1)
         eos_flag = False
         result = {'prompt': tokenizer.decode(prompt_ids[0], end="\n\n")}
         result['prompt_len'] =  len(prompt_ids[0])
@@ -107,6 +144,7 @@ def main(student_model_path,
             iter_counter += 1
 
             if gen_len >= max_new_tokens:
+                print(tokenizer.batch_decode(input_ids)[0])
                 break
 
         result['gen_len'] = gen_len
@@ -147,7 +185,7 @@ if __name__ == "__main__":
                         default="/nfs-stor/lanxiang/models/Llama-2-70b-chat-hf")
     parser.add_argument("--data", type=str,
                         help="data path",
-                        default="/home/hao.zhang/lanxiang/OSD_predictor/data/raw_data/sharegpt_all.json")
+                        default="../spider_eval/database/spider/test_data/dev.json")
     parser.add_argument("--max_propose_num", type=int,
                         help="number of proposed tokens",
                         default=10)
