@@ -35,7 +35,20 @@ python clean_{dataset}.py
 ```
 dataset can take the value of `spider`, `finance`, `code_search`, `gsm8k`.
 
+### Download teacher & draft model
+```
+# download teacher model to your path
+# download draft model, example: go to ./data/
+git clone https://huggingface.co/JackFram/llama-160m
+```
+
 ### LLaMA
+(Optional) Prepare offline dataset (if you want to run offline experiments):
+```
+# under ./data/
+python generate_answer.py --filename {your_cleaned_file_path} --model {teacher_model_path}
+```
+
 1. Reproduce results from the paper:
 ```
 # go back to the project root
@@ -43,21 +56,21 @@ bash bash_scripts/all.sh
 ```
 2. Customized offline distillation:
 ```
-bash bash_scripts/{dataset_name}/offline.sh {your_datapath} {sample_source} {distillation_method}
+bash bash_scripts/{dataset_name}/offline.sh {your_savepath} {sample_source} {distillation_method}
 ```
 3. Customized online distillation:
 ```
-bash bash_scripts/{dataset_name}/offline.sh {your_datapath} {sample_source} {distillation_method}
+bash bash_scripts/{dataset_name}/online.sh {your_savepath} {sample_source} {distillation_method}
 ```
 
 ### T5
 1. Customized offline distillation:
 ```
-bash bash_scripts/t5/offline.sh {your_datapath} {dataset_name} {sample_source} {distillation_method}
+bash bash_scripts/t5/offline.sh {your_savepath} {dataset_name} {sample_source} {distillation_method}
 ```
 2. Customized online distillation:
 ```
-bash bash_scripts/t5/onine.sh {your_datapath} {dataset_name} {sample_source} {distillation_method}
+bash bash_scripts/t5/online.sh {your_savepath} {dataset_name} {sample_source} {distillation_method}
 ```
 
 ### Command options
@@ -69,6 +82,7 @@ bash bash_scripts/t5/onine.sh {your_datapath} {dataset_name} {sample_source} {di
 --kl_method: distillation methods. Select one from {forward, reverse, jsd} \
 ```
 
+
 ### Datasets
 This repo currently supports distillation and evaluation on the following datasets:
 
@@ -76,6 +90,50 @@ Models | GSM8K | Spider | Finance-Alpaca | CSN Python | PIQA | Starcode | Arena 
 :---: | :---: | :---: | :---: | :---: | :---: | :---: |:---: | :---: | :---: |
  LLaMA | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |  |  |
 T5 | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |  |  |  | :heavy_check_mark: | :heavy_check_mark: |
+
+### Evaluations
+
+1. We conduct our latency experiments with [llamacpp](https://github.com/ggerganov/llama.cpp) on a single A100-80G. To reproduce the results, please first clone the repository:
+```
+# go back to the project root
+git clone https://github.com/ggerganov/llama.cpp.git
+```
+
+2. Copy your cleaned data files from `data/raw_data` to `llama.cpp/data/raw_data`.
+
+3. Set up [cpp json processing](https://github.com/nlohmann/json). Copy `nlohmann/json.hpp` to your cpp include path.
+
+4. Apply the following patches:
+```
+cp -r llamacpp_patches llama.cpp/
+cp -rv llamacpp_patches/speculative.cpp llama.cpp/examples/speculative/speculative.cpp
+
+# replace line 65 in speculative.cpp with the path to your cleaned test file.
+```
+
+5. Follow llamacpp's README to build the project with cuBLAS support.
+
+6. Prepare models:
+```
+bash llama.cpp/llamacpp_patches/download_models_160m.sh
+bash llama.cpp/llamacpp_patches/download_models.sh
+mv llama.cpp/llamacpp_patches/quantize_160m.sh llama.cpp/build && bash llama.cpp/build/quantize_160m.sh
+mv llama.cpp/llamacpp_patches/quantize.sh llama.cpp/build && bash llama.cpp/build/quantize.sh
+```
+
+7. Run conventional llamacpp speculative decoding inference to stream the dataset and collect runtime data for all queries. 
+
+### Model Weights
+
+#### Distilled draft models 
+
+| Size | Dataset |  Huggingface Repo                             |
+| ---- | -------- | --------------------------------------------- | 
+| 160m   | Finance-Alpaca |  [https://huggingface.co/eqhylxx/finance-llama160m](https://huggingface.co/eqhylxx/finance-llama160m)   |
+| 160m  | GSM8K | [https://huggingface.co/eqhylxx/gsm8k-llama160m](https://huggingface.co/eqhylxx/gsm8k-llama160m) |
+| 160m  | Spider | [https://huggingface.co/eqhylxx/spider-llama160m](https://huggingface.co/eqhylxx/spider-llama160m) |
+| 160m  | Code-Search-Net Python | [https://huggingface.co/eqhylxx/code-llama160m](https://huggingface.co/eqhylxx/code-llama160m) |
+
 
 ## Citation
 This is the official project repository for the following paper. If you find this repository helpful, Please cite:
