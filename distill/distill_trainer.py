@@ -209,7 +209,7 @@ class DistillTrainer(Trainer):
             sample_time_start = sychronize_time()
 
         if sample_mix_token:
-            copy_model.load_state_dict(model.state_dict())
+            copy_model.load_state_dict(self.remove_module_prefix(model.state_dict()))
             generated_ids = self.get_mix_generated_ids(
                 copy_model,
                 self.teacher_model,
@@ -221,7 +221,7 @@ class DistillTrainer(Trainer):
             )
             generated_ids = generated_ids.clone().detach()
         elif sample_student:
-            copy_model.load_state_dict(model.state_dict())
+            copy_model.load_state_dict(self.remove_module_prefix(model.state_dict()))
             generated_ids, _ = self.get_generated_ids(
                 copy_model,
                 self.tokenizer,
@@ -257,8 +257,6 @@ class DistillTrainer(Trainer):
                     inputs["labels"] == IGNORE_TOKEN_ID, self.tokenizer.unk_token_id, inputs["labels"])
                 print("[teacher]", self.tokenizer.batch_decode(
                     labels, skip_special_tokens=True))
-                print(f"bsz: {bsz}, total_len: {total_seq_len}, gen_len: {gen_len}, ",
-                      f"output_sum:{(~output_mask).sum()}, atten_mask: {attention_mask.sum()}")
 
         else:
             attention_mask = inputs["attention_mask"]
@@ -352,7 +350,7 @@ class DistillTrainer(Trainer):
 
     @torch.inference_mode()
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        output = self.generator.generate(inputs["input_ids"], 128)
+        output = self.generator.generate(inputs["input_ids"], 128, attention_mask=torch.ones_like(inputs["input_ids"]))
         find = False
         for callback in self.callback_handler.callbacks:
             if isinstance(callback, DistillTrainerCallback):
@@ -374,6 +372,15 @@ class DistillTrainer(Trainer):
     #     super().train(resume_from_checkpoint)
 
     ###################### Helper Functions #############################
+
+    def remove_module_prefix(self, state_dict):
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("module."):
+                new_state_dict[k[7:]] = v  # remove 'module.' prefix
+            else:
+                new_state_dict[k] = v
+        return new_state_dict
 
     def soft_cross_entropy(self, predicts, targets, padding_mask):
         predict_log_prob = torch.nn.functional.log_softmax(predicts, dim=-1)

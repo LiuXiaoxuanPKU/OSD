@@ -4,7 +4,7 @@ kl=$3
 
 python distill/train.py \
     --student_model_path JackFram/llama-160m \
-    --teacher_model_path $datapath/vicuna-7b-v1.3/ \
+    --teacher_model_path lmsys/vicuna-7b-v1.3/ \
     --data_path data/raw_data/code_search_net_train_with_answer.json \
     --eval_data_path data/raw_data/code_search_net_test.json \
     --max_propose_num 5 \
