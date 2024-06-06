@@ -48,17 +48,21 @@ git clone https://huggingface.co/JackFram/llama-160m
 # under ./data/
 python generate_answer.py --filename {your_cleaned_file_path} --model {teacher_model_path}
 ```
-
-1. Reproduce results from the paper:
-```
-# go back to the project root
-bash bash_scripts/all.sh
-```
-2. Customized offline distillation:
+1. Run offline distillation:
 ```
 bash bash_scripts/{dataset_name}/offline.sh {your_savepath} {sample_source} {distillation_method}
 ```
-3. Customized online distillation:
+An example will be:
+```
+bash bash_scripts/spider/offline.sh /output/ teacher forward
+```
+Notice the current script will run evaluation across the whole eval dataset after each epoch, which might be very slow.
+If you just want to distill the model without evaluation, feel free to change the evaluation strategy in the `offline.sh` script to `no`:
+```
+--evaluation_strategy "no"
+```
+ 
+2. Run online distillation:
 ```
 bash bash_scripts/{dataset_name}/online.sh {your_savepath} {sample_source} {distillation_method}
 ```
