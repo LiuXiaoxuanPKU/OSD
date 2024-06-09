@@ -54,7 +54,7 @@ bash bash_scripts/{dataset_name}/offline.sh {your_savepath} {sample_source} {dis
 ```
 An example will be:
 ```
-bash bash_scripts/spider/offline.sh /output/ teacher forward
+bash bash_scripts/spider/offline.sh ./output/ teacher forward
 ```
 Notice the current script will run evaluation across the whole eval dataset after each epoch, which might be very slow.
 If you just want to distill the model without evaluation, feel free to change the evaluation strategy in the `offline.sh` script to `no`:
@@ -66,6 +66,11 @@ If you just want to distill the model without evaluation, feel free to change th
 ```
 bash bash_scripts/{dataset_name}/online.sh {your_savepath} {sample_source} {distillation_method}
 ```
+An example will be:
+```
+bash bash_scripts/spider/online.sh ./output/ teacher forward
+```
+
 
 ### T5
 1. Customized offline distillation:
