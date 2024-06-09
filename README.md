@@ -1,6 +1,6 @@
-# Online Speculative Decoding (OSD)
+# [ICML2024] Online Speculative Decoding (OSD)
 
-This is the official project repository for [Online Speculative Decoding](https://arxiv.org/pdf/2310.07177.pdf) by Xiaoxuan Liu, Lanxiang Hu, Peter Bailis, Ion Stoica, Zhijie Deng, Alvin Cheung, Hao Zhang.
+This is the official project repository for [Online Speculative Decoding](https://arxiv.org/pdf/2310.07177.pdf) by Xiaoxuan Liu, Lanxiang Hu, Peter Bailis, Alvin Cheung, Zhijie Deng, Ion Stoica, Hao Zhang.
 
 <p align="center"><img src="assets/arch.png" alt="Architecture" width="800"></p>
 
