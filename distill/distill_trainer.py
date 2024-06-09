@@ -92,7 +92,8 @@ class DistillTrainer(Trainer):
         input_ids = inputs["input_ids"][inputs["attention_mask"]].unsqueeze(0)
         # use speculative decoding to generate tokens
         output = self.generator.generate(input_ids,
-                                         max_new_tokens)
+                                         max_new_tokens,
+                                         attention_mask=torch.ones_like(input_ids))
 
         token_ids = torch.cat([input_ids, output.generated_ids], dim=-1)
         wrong_token_ids = [
@@ -174,7 +175,8 @@ class DistillTrainer(Trainer):
             self.buffer = []
             return loss.detach()
         else:
-            return torch.tensor(-1)
+            self.model.eval()
+            return torch.tensor(-1).cuda()
 
     def offline_training_step(self, model, inputs):
         max_new_tokens = 128
@@ -370,6 +372,19 @@ class DistillTrainer(Trainer):
 
     #     # Now start the actual training
     #     super().train(resume_from_checkpoint)
+
+    def optimizer_step(self, model, optimizer, optimizer_idx, closure=None, **kwargs):
+        print("============I am in Optimizer================")
+        # Customize the optimizer step
+        if closure is not None:
+            closure()
+        
+        # Optional: Apply gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
+        # Step the optimizer
+        optimizer.step()
+        optimizer.zero_grad() 
 
     ###################### Helper Functions #############################
 

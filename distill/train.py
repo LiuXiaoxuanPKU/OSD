@@ -349,6 +349,8 @@ def train():
         (ModelArguments, DataArguments, TrainingArguments)
     )
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    # Disable gradient clipping
+    training_args.max_grad_norm=0.0  # Disable gradient clipping
     local_rank = training_args.local_rank
 
     # Set RoPE scaling factor
