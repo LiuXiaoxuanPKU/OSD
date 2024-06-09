@@ -145,7 +145,7 @@ mv llama.cpp/llamacpp_patches/quantize.sh llama.cpp/build && bash llama.cpp/buil
 | 160m  | GSM8K | [https://huggingface.co/eqhylxx/gsm8k-llama160m](https://huggingface.co/eqhylxx/gsm8k-llama160m) |
 | 160m  | Spider | [https://huggingface.co/eqhylxx/spider-llama160m](https://huggingface.co/eqhylxx/spider-llama160m) |
 | 160m  | Code-Search-Net Python | [https://huggingface.co/eqhylxx/code-llama160m](https://huggingface.co/eqhylxx/code-llama160m) |
-
+| 160m  | ShareGPT | https://huggingface.co/eqhylxx/vicuna-160m |
 
 ## Citation
 This is the official project repository for the following paper. If you find this repository helpful, Please cite:
