@@ -43,12 +43,23 @@ git clone https://huggingface.co/JackFram/llama-160m
 ```
 
 ### LLaMA
-(Optional) Prepare offline dataset (if you want to run offline experiments):
+0. Prepare dataset (if you want to run offline experiments):
 ```
 # under ./data/
 python generate_answer.py --filename {your_cleaned_file_path} --model {teacher_model_path}
 ```
-1. Run offline distillation:
+1. Run online distillation:
+```
+bash bash_scripts/{dataset_name}/online.sh {your_savepath} {sample_source} {distillation_method}
+```
+An example will be:
+```
+bash bash_scripts/spider/online.sh ./output/ teacher forward
+```
+For example, running the command above on the `spider` dataset first 100 data records, you should see similar alphas (token acceptance rates)/loss on `wandb` as below:
+<p align="center"><img src="assets/spider.png" alt="Spider Online" width="800"></p>
+
+2. Run offline distillation:
 ```
 bash bash_scripts/{dataset_name}/offline.sh {your_savepath} {sample_source} {distillation_method}
 ```
@@ -61,15 +72,7 @@ If you just want to distill the model without evaluation, feel free to change th
 ```
 --evaluation_strategy "no"
 ```
- 
-2. Run online distillation:
-```
-bash bash_scripts/{dataset_name}/online.sh {your_savepath} {sample_source} {distillation_method}
-```
-An example will be:
-```
-bash bash_scripts/spider/online.sh ./output/ teacher forward
-```
+
 
 
 ### T5
