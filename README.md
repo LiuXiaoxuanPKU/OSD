@@ -150,10 +150,11 @@ mv llama.cpp/llamacpp_patches/quantize.sh llama.cpp/build && bash llama.cpp/buil
 ## Citation
 This is the official project repository for the following paper. If you find this repository helpful, Please cite:
 ```
-@misc{liu2023online,
+@misc{liu2024online,
       title={Online Speculative Decoding}, 
-      author={Liu, Xiaoxuan and Hu, Lanxiang and Bailis, Peter and Stoica, Ion and Deng, Zhijie and Cheung, Alvin and Zhang, Hao},
-      year={2023},
+      author={Xiaoxuan Liu and Lanxiang Hu and Peter Bailis and Alvin Cheung and Zhijie Deng and Ion Stoica and Hao Zhang},
+      year={2024},
+      eprint={2310.07177},
       archivePrefix={arXiv},
       primaryClass={cs.AI}
 }
