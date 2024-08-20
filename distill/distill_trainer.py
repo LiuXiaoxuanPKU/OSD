@@ -59,12 +59,14 @@ class DistillTrainer(Trainer):
         self.mode = args.mode
         self.online_eval_interval = args.online_eval_interval
         self.online_update_interval = args.online_update_interval
+        self.recompute_logits = args.recompute_logits
         self.buffer = []
         self.alphas = []
         self.alphas_by_dataset = {}
         self.alphas_by_language = {}
         self.alphas_by_topic = {}
         self.sample_steps = []
+        self.time_recompute_logits = []
 
         self.sample_source = SAMPLE_SOURCE_MAP[args.sample_source]
         self.kl_method = KL_METHOD_MAP[args.kl_method]
@@ -96,7 +98,7 @@ class DistillTrainer(Trainer):
                                          attention_mask=torch.ones_like(input_ids))
 
         token_ids = torch.cat([input_ids, output.generated_ids], dim=-1)
-        wrong_token_ids = [
+        wrong_token_ids_position = [
             input_ids.shape[-1] + t for t in output.wrong_token_ids
         ]
         if "dataset" in inputs:
@@ -105,12 +107,12 @@ class DistillTrainer(Trainer):
                 self.alphas_by_dataset[dataset] = []
             if self.train_step_cnt <= 2000:
                 if dataset == "gsm8k":
-                    self.buffer.append((token_ids, wrong_token_ids))
+                    self.buffer.append((token_ids, wrong_token_ids_position, output.accept_token_logits_full))
             else:
                 if dataset == "finance":
-                    self.buffer.append((token_ids, wrong_token_ids))
+                    self.buffer.append((token_ids, wrong_token_ids_position, output.accept_token_logits_full))
         else:
-            self.buffer.append((token_ids, wrong_token_ids))
+            self.buffer.append((token_ids, wrong_token_ids_position, output.accept_token_logits_full))
 
         self.alphas.append(output.alpha_sum)
         self.sample_steps.append(output.sample_steps)
@@ -157,17 +159,42 @@ class DistillTrainer(Trainer):
                 model, input_ids, torch.ones_like(input_ids)
             ).float()
             # generate teacher logits as the label
-            # TODO: we can avoid this forward by getting logits during speculative decoding
-            with torch.no_grad():
-                teacher_logits = self.get_logits(
-                    self.teacher_model, input_ids, torch.ones_like(input_ids)
-                ).float()
+            if self.recompute_logits:
+                # TODO: we can avoid this forward by getting logits during speculative decoding
+                now = sychronize_time()
+                with torch.no_grad():
+                    teacher_logits = self.get_logits(
+                        self.teacher_model, input_ids, torch.ones_like(input_ids)
+                    ).float()
+                self.time_recompute_logits.append(sychronize_time() - now)
+
+            else:
+                now = sychronize_time()
+                teacher_logits = torch.tensor([]).cuda()
+                for i, data in enumerate(self.buffer):
+                    computed_logits = torch.stack(data[2])
+                    token_ids = data[0]
+
+                    answer_length, vocab_size = computed_logits.shape
+                    instruction_length = token_ids.shape[-1] - answer_length
+
+                    # Pad before for the instruction, pad after for the end sequnce token
+                    # data[2] only contains the logits for the tokens that are accepted
+                    logits = torch.zeros_like(input_ids[0].unsqueeze(0)).unsqueeze(-1).expand(-1, -1, vocab_size).float()
+                    logits[:, instruction_length - 1 : instruction_length + answer_length -1, :] = computed_logits
+
+                    teacher_logits = torch.cat([teacher_logits, logits], dim=0)
+                self.time_recompute_logits.append(sychronize_time() - now)
+
+            wandb.log({f"time_recompute_logits": self.time_recompute_logits[-1]})
+            wandb.log({f"average_time_recompute_logits": sum(self.time_recompute_logits) / len(self.time_recompute_logits)})
+            wandb.log({f"sum_time_recompute_logits": sum(self.time_recompute_logits)})
 
             # only compute loss at wrong predictions
             mask = torch.ones_like(input_ids, dtype=torch.bool)
             for i, data in enumerate(self.buffer):
-                cur_wrong_token_ids = data[1]
-                mask[i, cur_wrong_token_ids] = False
+                cur_wrong_token_ids_position = data[1]
+                mask[i, cur_wrong_token_ids_position] = False
 
             loss = self.soft_cross_entropy(
                 student_logits, teacher_logits, mask)

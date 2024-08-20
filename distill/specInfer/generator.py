@@ -22,6 +22,7 @@ class GeneratorOutput:
     alpha_sum: float
     wrong_token_ids: List[int]
     student_generated_ids: torch.tensor = None
+    accept_token_logits_full: List[torch.tensor] = None
 
 
 class Generator:
@@ -71,6 +72,7 @@ class Generator:
                       verified_output: OutputAndCache) -> torch.Tensor:
         # Accept-reject token loop
         accept_ids = []
+        accept_logits = []
         all_accepted = True
         sample_steps = 0
         alpha = 0
@@ -93,12 +95,14 @@ class Generator:
 
             if rs < sampled_ratios:
                 accept_ids.append(proposed_output.output_ids[:, t])
+                accept_logits.append(verified_output.output_logits[t])
             else:
                 all_accepted = False
                 next_token_id = target_sample_from_distribution(
                     verified_output.output_distribution[t, :],
                     proposed_output.output_distribution[t, :])
                 accept_ids.append(next_token_id.unsqueeze(0))
+                accept_logits.append(verified_output.output_logits[t])
                 break
 
         # if all tokens were accepted, sample a last one
@@ -108,9 +112,10 @@ class Generator:
 
             assert next_token_id.dim() == 1
             accept_ids.append(next_token_id)
+            accept_logits.append(verified_output.output_logits[-1])
 
         accept_ids = torch.cat(accept_ids, dim=0)
-        return accept_ids.unsqueeze(0), alpha, sample_steps
+        return accept_ids.unsqueeze(0), alpha, sample_steps, accept_logits
 
     @torch.inference_mode()
     def generate(self, input_ids, max_tokens, temperature=0.01, attention_mask=None, labels=None):
@@ -145,6 +150,7 @@ class Generator:
         correct_tokens = None
         propose_steps = 0
         alpha, sample_steps = 0, 0
+        accept_token_logits_full = []
         while True:
             start = sychronize_time()
             # propose n tokens, proposer always propose the token with highest probability
@@ -174,10 +180,12 @@ class Generator:
 
             # compare selected tokens
             # accept_token_ids, cur_alpha, cur_sample_steps = self.compare_tokens(proposer_output, verifier_output)
-            accept_token_ids, cur_alpha, cur_sample_steps = self.sample_tokens(
+            accept_token_ids, cur_alpha, cur_sample_steps, accept_token_logits = self.sample_tokens(
                 proposer_output, verifier_output)
             alpha += cur_alpha
             sample_steps += cur_sample_steps
+            accept_token_logits_full.extend(accept_token_logits)
+
             # logger.log("acc_tokens", accept_token_ids)
             if generated_tokens is None:
                 generated_tokens = accept_token_ids
@@ -231,7 +239,8 @@ class Generator:
                                sample_steps,
                                alpha,
                                wrong_token_ids,
-                               student_generated_tokens)
+                               student_generated_tokens,
+                               accept_token_logits_full)
 
     def print_time(self):
         if self.benchmark_time:

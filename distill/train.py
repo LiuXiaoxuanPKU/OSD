@@ -97,6 +97,12 @@ class TrainingArguments(transformers.TrainingArguments):
             "choices" : ["forward", "reverse", "jsd"]
         }
     )
+    recompute_logits: bool = field(
+        default=False,
+        metadata = {
+            "help" : "recompute logits for distillation"
+        }
+    )
 
 
 local_rank = None
