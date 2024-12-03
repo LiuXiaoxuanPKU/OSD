@@ -27,104 +27,80 @@ class Verifier:
         self.benchmark_time = benchmark_time
 
         self.is_encoder_decoder = is_encoder_decoder
-    
-    def _get_embedding_device(self):
-        if self.is_encoder_decoder:
-            # For encoder-decoder models
-            embedding_device = self.model.get_encoder().embed_tokens.weight.device
-        else:
-            # For LLaMA and similar models
-            embedding_device = self.model.model.embed_tokens.weight.device
-        return embedding_device
 
-    def verify(self, input: InputAndCache, propose_len: int, sample_method) -> Tuple[InputAndCache, torch.Tensor]:
+    def verify(self, input: InputAndCache,
+               propose_len: int,
+               sample_method) -> Tuple[InputAndCache, torch.Tensor]:
         if self.benchmark_time:
             start = sychronize_time()
 
-        # Get the device of the embeddings
-        embedding_device = self._get_embedding_device()
-
-        # Move input tensors to the embedding device
-        input_ids = input.input_ids.to(embedding_device)
-        attention_mask = input.attention_mask.to(embedding_device) if input.attention_mask is not None else None
-        decoder_input_ids = input.decoder_input_ids.to(embedding_device) if input.decoder_input_ids is not None else None
-        past_key_values = input.past_key_values  # This should already be correctly assigned
-
-        # Call the model with inputs on the correct device
         if self.is_encoder_decoder:
-            outputs = self.model(
-                input_ids=input_ids,
-                decoder_input_ids=decoder_input_ids,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                use_cache=True
-            )
+            outputs = self.model(input_ids=input.input_ids,
+                                 decoder_input_ids=input.decoder_input_ids,
+                                 attention_mask=input.attention_mask,
+                                 past_key_values=input.past_key_values)
         else:
-            outputs = self.model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                use_cache=True
-            )
-
-        next_token_scores = self.processor(input_ids, outputs.logits)
+            outputs = self.model(input_ids=input.input_ids,
+                                 attention_mask=input.attention_mask,
+                                 past_key_values=input.past_key_values,
+                                 use_cache=True)
+        next_token_scores = self.processor(input.input_ids, outputs.logits)
         generated_len = propose_len + 1
         logits = next_token_scores[:, -generated_len:, :]
+        # next_tokens = sample_fn(logits)
 
         if self.benchmark_time:
             self.verify_times.append(sychronize_time() - start)
+        # output logits/distribution has shape [# of proposed tokens, vocab_size]
+        # we squeeze the batch size dimension in the output because it is always 1
+        return OutputAndCache(generated_len, None, logits.squeeze(0),
+                              sample_method(logits.squeeze(0)), outputs.past_key_values)
 
-        return OutputAndCache(
-            generated_len,
-            None,
-            logits.squeeze(0),
-            sample_method(logits.squeeze(0)),
-            outputs.past_key_values
-        )
-
-    def prepare_input(self, proposer_output: OutputAndCache, verifier_input: InputAndCache) -> InputAndCache:
+    def prepare_input(self, proposer_output: OutputAndCache,
+                      verifier_input: InputAndCache) -> InputAndCache:
         if self.benchmark_time:
             start = sychronize_time()
 
-        # Get the embedding device
-        embedding_device = self._get_embedding_device()
-
-        # Move tensors to the embedding device
-        if self.is_encoder_decoder:
-            decoder_input_ids = torch.cat(
-                [verifier_input.decoder_input_ids.to(embedding_device), proposer_output.output_ids.to(embedding_device)], dim=-1
-            )
-            attention_mask = verifier_input.attention_mask.to(embedding_device)
-            input_ids = verifier_input.input_ids.to(embedding_device)
+        if verifier_input.past_key_values is None:
+            # concatenate proposed inputs with prompts
+            if self.is_encoder_decoder:
+                decoder_input_ids = torch.cat(
+                    [verifier_input.decoder_input_ids, proposer_output.output_ids], dim=-1)
+                attention_mask = verifier_input.attention_mask
+            else:
+                input_ids = torch.cat(
+                    [verifier_input.input_ids, proposer_output.output_ids], dim=-1)
+                # concatenate prompt masks with proposed token masks
+                attention_mask = torch.cat([verifier_input.attention_mask,
+                                            torch.ones_like(proposer_output.output_ids,
+                                                            dtype=torch.long, device="cuda")], dim=-1)
+            # prompt phase, we don't have kv cache (past_key_values)
+            past_key_values = None
         else:
-            input_ids = torch.cat(
-                [verifier_input.input_ids.to(embedding_device), proposer_output.output_ids.to(embedding_device)], dim=-1
-            )
-            attention_mask = torch.cat(
-                [verifier_input.attention_mask.to(embedding_device),
-                torch.ones_like(proposer_output.output_ids, dtype=torch.long, device=embedding_device)],
-                dim=-1
-            )
+            if self.is_encoder_decoder:
+                decoder_input_ids = torch.cat([verifier_input.decoder_input_ids.unsqueeze(
+                    0), proposer_output.output_ids], dim=-1)
+                attention_mask = verifier_input.attention_mask
+            else:
+                input_ids = torch.cat([verifier_input.input_ids.unsqueeze(
+                    0), proposer_output.output_ids], dim=-1)
+                attention_mask = torch.cat([verifier_input.attention_mask,
+                                            torch.ones_like(proposer_output.output_ids,
+                                                            dtype=torch.long, device="cuda")], dim=-1)
 
-        past_key_values = verifier_input.past_key_values  # Should already be correctly assigned
+            past_key_values = verifier_input.past_key_values
 
         if self.benchmark_time:
             self.prepare_input_time += sychronize_time() - start
 
         if self.is_encoder_decoder:
-            return InputAndCache(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                labels=verifier_input.labels,
-                decoder_input_ids=decoder_input_ids
-            )
+            return InputAndCache(verifier_input.input_ids,
+                                 attention_mask,
+                                 past_key_values,
+                                 verifier_input.labels,
+                                 decoder_input_ids)
         else:
-            return InputAndCache(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values
-            )
+            return InputAndCache(input_ids, attention_mask, past_key_values)
 
     def adjust_input(self,
                      accept_token_ids: torch.Tensor,
@@ -132,8 +108,6 @@ class Verifier:
                      verifier_output: OutputAndCache) -> InputAndCache:
         if self.benchmark_time:
             start = sychronize_time()
-        # Get the embedding device
-        embedding_device = self._get_embedding_device()
 
         n_matches = accept_token_ids.shape[1]
         if str(self.model.__class__.__name__) in ["GPTBigCodeForCausalLM"]:

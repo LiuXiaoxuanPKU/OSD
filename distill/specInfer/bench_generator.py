@@ -183,10 +183,11 @@ class Generator:
                 sample_method)
 
             prob_list = []
-            for j in range(proposer_output.generated_len):
-                next_token_id = proposer_output.output_ids[j]
-                confidence_distribution = confidence_sample_method(proposer_output.output_logits[j])
 
+            for j in range(proposer_output.generated_len):
+                next_token_id = proposer_output.output_ids[0, j]
+                confidence_distribution = confidence_sample_method(proposer_output.output_logits[j])
+                
                 next_token_prob = confidence_distribution[next_token_id].detach().item()
                 prob_list.append(next_token_prob)
 
@@ -228,10 +229,14 @@ class Generator:
                 # append student token
                 student_token_ids = student_proposer_output.output_ids
                 if student_generated_tokens is None:
-                    student_generated_tokens = student_proposer_output.output_ids.reshape(1, -1)
+                    # FIXME (lanxiang): dirty fix for llama 3.1 & llama3.2 vs. llama2 (which requires reshape)
+                    #student_generated_tokens = student_proposer_output.output_ids.reshape(1, -1)
+                    student_generated_tokens = student_proposer_output.output_ids
                 else:
+                    #student_generated_tokens = torch.cat(
+                    #    [student_generated_tokens, student_proposer_output.output_ids.reshape(1, -1)], dim=-1)
                     student_generated_tokens = torch.cat(
-                        [student_generated_tokens, student_proposer_output.output_ids.reshape(1, -1)], dim=-1)
+                        [student_generated_tokens, student_proposer_output.output_ids], dim=-1)
                 student_generated_token_cnt += student_token_ids.shape[1]
 
             if correct_tokens is None:

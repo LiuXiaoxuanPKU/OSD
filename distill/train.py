@@ -123,38 +123,8 @@ def preprocess(
     model: str,
     do_eval: bool
 ) -> Dict:
-    if ("llama" in model.lower()) or ("starcoder" in model.lower()):
-        # does not support multi-round conversation for llama
-        # print(sources)
-        if tokenizer.model_max_length > 1024 * 16:
-            tokenizer.model_max_length = 1024 * 16
-        if do_eval:
-            assert len(sources) == 1
-            conversations = [sources[0][0]["content"]]
-            input_ids = tokenizer(
-                conversations,
-                return_tensors="pt"
-            ).input_ids
-        else:
-            # Apply prompt templates
-            conversations = []
-            for i, source in enumerate(sources):
-                conversations.append(
-                    source[0]["content"] + source[1]["content"])
-            input_ids = tokenizer(
-                conversations,
-                return_tensors="pt",
-                padding="max_length",
-                max_length=tokenizer.model_max_length,
-                truncation=True,
-            ).input_ids
-        targets = input_ids.clone()
-        return dict(
-            input_ids=input_ids,
-            labels=targets,
-            attention_mask=input_ids.ne(tokenizer.pad_token_id),
-        )
-    elif "vicuna" in model.lower():
+    if "vicuna" in model.lower() or "instruct" in model.lower():
+        print("instruction-following model is used...")
         conv = get_conversation_template(model)
         roles = {"user": conv.roles[0], "assistant": conv.roles[1]}
 
@@ -261,6 +231,38 @@ def preprocess(
             attention_mask=input_ids.ne(tokenizer.pad_token_id),
             prompt_ids=prompts["input_ids"],
             prompt_attention_mask=prompts["attention_mask"]
+        )
+    elif ("llama" in model.lower()) or ("starcoder" in model.lower()):
+        print("raw llama model is used...")
+        # does not support multi-round conversation for llama
+        # print(sources)
+        if tokenizer.model_max_length > 1024 * 16:
+            tokenizer.model_max_length = 1024 * 16
+        if do_eval:
+            assert len(sources) == 1
+            conversations = [sources[0][0]["content"]]
+            input_ids = tokenizer(
+                conversations,
+                return_tensors="pt"
+            ).input_ids
+        else:
+            # Apply prompt templates
+            conversations = []
+            for i, source in enumerate(sources):
+                conversations.append(
+                    source[0]["content"] + source[1]["content"])
+            input_ids = tokenizer(
+                conversations,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+            ).input_ids
+        targets = input_ids.clone()
+        return dict(
+            input_ids=input_ids,
+            labels=targets,
+            attention_mask=input_ids.ne(tokenizer.pad_token_id),
         )
     else:
         raise NotImplementedError(
